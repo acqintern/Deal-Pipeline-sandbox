@@ -48,33 +48,35 @@
     if (error) throw error;
     return (data || []).map((r) => ({ ...(r.data || {}), id: r.id }));
   }
+  let lastSavedSnapshot = {}; // remembers what we last successfully sent, per deal
   async function saveDeals(deals) {
-   let lastSavedSnapshot = {}; // remembers what we last sent, per deal
+    if (!client) return;
+    const changedRows = [];
+    const changedSnapshots = {};
+    const currentIds = new Set();
 
-async function saveDeals(deals) {
-  if (!client) return;
-  const changedRows = [];
-  const currentIds = new Set();
+    deals.forEach((d, i) => {
+      const id = String(d.id);
+      currentIds.add(id);
+      const snapshot = JSON.stringify({ data: d, position: i });
+      if (lastSavedSnapshot[id] !== snapshot) {
+        changedRows.push({ id, data: d, position: i, updated_at: new Date().toISOString() });
+        changedSnapshots[id] = snapshot;
+      }
+    });
 
-  deals.forEach((d, i) => {
-    const id = String(d.id);
-    currentIds.add(id);
-    const snapshot = JSON.stringify({ data: d, position: i });
-    if (lastSavedSnapshot[id] !== snapshot) {
-      changedRows.push({ id, data: d, position: i, updated_at: new Date().toISOString() });
-      lastSavedSnapshot[id] = snapshot;
+    if (changedRows.length) {
+      const { error: upErr } = await client.from('deals').upsert(changedRows, { onConflict: 'id' });
+      if (upErr) throw upErr; // don't mark as saved if the request failed — will retry next save
+      Object.assign(lastSavedSnapshot, changedSnapshots); // only now mark them synced
     }
-  });
 
-  if (changedRows.length) {
-    const { error: upErr } = await client.from('deals').upsert(changedRows, { onConflict: 'id' });
-    if (upErr) throw upErr;
-  }
-
-  Object.keys(lastSavedSnapshot).forEach((id) => {
-    if (!currentIds.has(id)) delete lastSavedSnapshot[id];
-  });
-}
+    Object.keys(lastSavedSnapshot).forEach((id) => {
+      if (!currentIds.has(id)) delete lastSavedSnapshot[id];
+    });
+    // NOTE: No auto-delete here. Deletion from cloud is done explicitly via
+    // deleteCloudDeals(ids) so that a race condition or stale state can never
+    // silently wipe deals that the user hasn't intentionally removed.
   }
 
   // Explicitly remove specific deal IDs from cloud. Called only when the user
