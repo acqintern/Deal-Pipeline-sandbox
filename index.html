@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Altus Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --navy:#0f2942; --navy-2:#15324f; --navy-3:#1d4068;
+    --ink:#111b27; --slate:#4a5b6e; --muted:#7a8a9c; --faint:#a8b5c2;
+    --line:#e4e9f0; --line-2:#d2dae4;
+    --bg:#edf0f5; --panel:#ffffff; --panel-2:#f5f7fa; --panel-3:#edf0f5;
+    --accent:#2f6df0; --accent-2:#1d52d6; --accent-soft:#e8f0fe;
+    --pos:#0c7a43; --pos-soft:#e0f2ea; --neg:#c93c40; --neg-soft:#fce8e8;
+    --warn:#b87214; --warn-soft:#fdf0d8;
+    --radius:8px; --radius-lg:12px;
+    --shadow:0 1px 3px rgba(16,30,50,.07);
+    --shadow-lg:0 6px 24px rgba(16,30,50,.13);
+    --row-h:44px;
+    --font:'Inter',system-ui,sans-serif;
+    --mono:'Inter',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    font-family:var(--font); color:var(--ink); background:var(--bg);
+    -webkit-font-smoothing:antialiased; font-size:13.5px; line-height:1.5;
+    font-weight:400;
+  }
+  #root{height:100%;}
+  .num{font-family:var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em;}
+  button{font-family:inherit; cursor:pointer;}
+  input,select,textarea{font-family:inherit; font-size:inherit; color:var(--ink);}
+  ::selection{background:var(--accent-soft);}
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:#c2ccd8;border-radius:6px;border:2px solid var(--bg);}
+  ::-webkit-scrollbar-thumb:hover{background:#a8b4c2;}
+  .clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
+  .fade{animation:fadeUp .24s ease both;}
+  @keyframes scrimIn{from{opacity:0;}to{opacity:1;}}
+  @keyframes drawerIn{from{transform:translateX(100%);}to{transform:none;}}
+  @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+  @media print {
+    @page { size: landscape; margin: 0; }
+    body * { visibility: hidden !important; }
+    #ic-memo-sheet, #ic-memo-sheet * { visibility: visible !important; }
+    #ic-memo-sheet { position: fixed !important; left: 0 !important; top: 0 !important; box-shadow: none !important; }
+    .memo-toolbar { display: none !important; }
+  }
+  @keyframes modalIn{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:none;}}
+</style>
+<link id="gfont-Inter" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&display=swap">
+<style>
+@media print {
+  @page { size: 1200px 780px; margin: 0; }
+  html, body { background: white !important; }
+  body * { visibility: hidden; }
+  #ic-memo-sheet, #ic-memo-sheet * {
+    visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #ic-memo-sheet {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important;
+    width: 1200px !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  #ic-memo-sheet * { overflow: visible !important; }
+  .memo-toolbar { visibility: hidden !important; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" fill="#0f2942"/>
+    <rect x="20" y="58" width="11" height="22" rx="2" fill="#2f6df0"/>
+    <rect x="36" y="44" width="11" height="36" rx="2" fill="#5b8bf5"/>
+    <rect x="52" y="32" width="11" height="48" rx="2" fill="#9eb ff" fill-opacity="0.9"/>
+    <rect x="68" y="50" width="11" height="30" rx="2" fill="#2f6df0"/>
+    <circle cx="50" cy="26" r="5" fill="#fff"/>
+  </svg>
+</template>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';</script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="supabase-config.js"></script>
+<script src="app/cloud.js"></script>
+<script src="app/data.js"></script>
+<script src="app/uwmodel.js"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="app/components.jsx"></script>
+<script type="text/babel" src="app/dealDetail.jsx"></script>
+<script type="text/babel" src="app/uwsections.jsx"></script>
+<script type="text/babel" src="app/returns.jsx"></script>
+<script type="text/babel" src="app/vault.jsx"></script>
+<script type="text/babel" src="app/marketreview.jsx"></script>
+<script type="text/babel" src="app/icmemo.jsx"></script>
+<script type="text/babel" src="app/views.jsx"></script>
+<script type="text/babel" src="app/crm.jsx"></script>
+<script type="text/babel" src="app/todos.jsx"></script>
+<script type="text/babel" src="app/app.jsx"></script>
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<AltusApp />);
+</script>
+</body>
+</html>

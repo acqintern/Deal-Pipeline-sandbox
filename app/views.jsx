@@ -1,0 +1,427 @@
+// app/views.jsx — Priority Deals widget + Pipeline Metrics view + Analytics view
+const { useState: useStateV, useMemo: useMemoV } = React;
+
+/* ============================ Priority Deals Widget ============================ */
+// Ranks active deals by: CFO Date proximity → closeness to guidance → IRR → YOC → vintage → low vacancy
+const PRIORITY_ACTIVE_STAGES = ['New Deal', 'Quick UW', 'Full UW', 'Excel UW', 'LOI Submitted', 'Under Contract'];
+
+function _computeDealPriority(deal) {
+  const today = new Date(window.ALTUS_TODAY + 'T12:00:00');
+  let score = 0;
+  let topReason = null;
+
+  // 1. Closest upcoming CFO Date — highest weight
+  if (deal.cfoDate) {
+    const cfo = new Date(deal.cfoDate + 'T12:00:00');
+    const daysUntil = Math.round((cfo - today) / 86400000);
+    if (daysUntil >= 0 && daysUntil <= 7)  { score += 1000; topReason = { text: 'CFO in ' + daysUntil + 'd', urgency: 'high' }; }
+    else if (daysUntil <= 30)               { score += 800;  topReason = { text: 'CFO in ' + daysUntil + 'd', urgency: 'high' }; }
+    else if (daysUntil <= 60)               { score += 500;  topReason = { text: 'CFO in ' + daysUntil + 'd', urgency: 'mid' }; }
+    else if (daysUntil <= 90)               { score += 280;  topReason = { text: 'CFO in ' + daysUntil + 'd', urgency: 'mid' }; }
+  }
+
+  // 2. Closest to Guidance Price
+  if (deal.purchasePrice && deal.askPrice && deal.askPrice > 0) {
+    const gap = (deal.askPrice - deal.purchasePrice) / deal.askPrice;
+    if (gap >= -0.01 && gap < 0.03)      { score += 400; if (!topReason) topReason = { text: Math.abs(Math.round(gap * 100)) + '% from guidance', urgency: 'high' }; }
+    else if (gap >= -0.01 && gap < 0.07) { score += 200; if (!topReason) topReason = { text: Math.round(gap * 100) + '% below ask',    urgency: 'mid' }; }
+    else if (gap >= -0.01 && gap < 0.12) { score += 80; }
+  }
+
+  // 3. Highest Deal IRR  4. Highest YOC  6. Lowest Economic Vacancy
+  if (window.hasUWInputs && window.hasUWInputs(deal) && window.computeUW) {
+    try {
+      const uw = window.computeUW(deal);
+      if (uw.irr != null && uw.irr > 0) {
+        score += uw.irr * 300;
+        if (!topReason && uw.irr >= 0.13)
+          topReason = { text: (uw.irr * 100).toFixed(1) + '% IRR', urgency: uw.irr >= 0.16 ? 'high' : 'mid' };
+      }
+      const yocRow = uw.rows && uw.rows[uw.hold];
+      if (yocRow && yocRow.yieldOnCost > 0) score += yocRow.yieldOnCost * 150;
+      if (uw.inPlaceEconVac != null) score += (1 - uw.inPlaceEconVac) * 30;
+    } catch (e) {}
+  }
+
+  // 5. Vintage — newer = better
+  if (deal.vintage) score += Math.max(0, deal.vintage - 1970) * 0.3;
+
+  return { score, topReason };
+}
+
+function _getPriorityLevel(deal, score) {
+  const today = new Date(window.ALTUS_TODAY + 'T12:00:00');
+  if (deal.cfoDate) {
+    const daysUntil = Math.round((new Date(deal.cfoDate + 'T12:00:00') - today) / 86400000);
+    if (daysUntil >= 0 && daysUntil <= 30) return 'High';
+    if (daysUntil >= 0 && daysUntil <= 90) return 'Medium';
+  }
+  if (score >= 380) return 'High';
+  if (score >= 130) return 'Medium';
+  return 'Low';
+}
+
+const PRIORITY_META = {
+  High:   { color: '#c23a3e', bg: '#fce8e8' },
+  Medium: { color: '#b8721a', bg: '#fdf0d8' },
+  Low:    { color: '#5b7088', bg: '#eef1f5' },
+};
+
+function PriorityDealsWidget({ deals, onOpen }) {
+  const LS_PRIORITY_LIMIT = 'altus_priority_limit_v1';
+  const [limit, setLimit] = useStateV(() => {
+    try { const v = parseInt(localStorage.getItem(LS_PRIORITY_LIMIT)); return [5,7,10].includes(v) ? v : 7; } catch(e) { return 7; }
+  });
+  const updateLimit = (n) => { setLimit(n); try { localStorage.setItem(LS_PRIORITY_LIMIT, n); } catch(e) {} };
+
+  const rows = useMemoV(() => {
+    const active = deals.filter((d) => PRIORITY_ACTIVE_STAGES.includes(d.stage));
+    return active
+      .map((d) => { const { score, topReason } = _computeDealPriority(d); return { deal: d, score, topReason, level: _getPriorityLevel(d, score) }; })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  }, [deals, limit]);
+
+  if (!rows.length) return null;
+
+  const today = new Date(window.ALTUS_TODAY + 'T12:00:00');
+
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)', marginBottom: 18, overflow: 'hidden' }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 18px', borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--navy)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+            <Icon name="target" size={13} />
+          </span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-.01em' }}>Priority Deals</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>Top {rows.length} by urgency &amp; opportunity</span>
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[5, 7, 10].map((n) => (
+            <button key={n} onClick={() => updateLimit(n)} style={{
+              padding: '3px 9px', fontSize: 11.5, fontWeight: 500, border: '1px solid var(--line-2)', borderRadius: 6,
+              background: limit === n ? 'var(--navy)' : 'var(--panel-2)',
+              color: limit === n ? '#fff' : 'var(--slate)', cursor: 'pointer', fontFamily: 'var(--font)' }}>
+              Top {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Column headers */}
+      <div style={{ display: 'grid', gridTemplateColumns: '84px 1fr 120px 160px 124px', padding: '0 18px', background: 'var(--panel-3)', borderBottom: '1px solid var(--line)' }}>
+        {[['Priority', 'left'], ['Deal', 'left'], ['Stage', 'left'], ['Why Now', 'left'], ['CFO Date', 'right']].map(([h, align]) => (
+          <div key={h} style={{ padding: '6px 0', fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: align }}>
+            {h}
+          </div>
+        ))}
+      </div>
+
+      {/* Rows */}
+      {rows.map(({ deal, level, topReason }, i) => {
+        const pm = PRIORITY_META[level];
+        const cfoD = deal.cfoDate ? new Date(deal.cfoDate + 'T12:00:00') : null;
+        const cfoInDays = cfoD ? Math.round((cfoD - today) / 86400000) : null;
+        const hasCFO = cfoInDays != null && cfoInDays >= 0;
+        return (
+          <button key={deal.id} onClick={() => onOpen(deal.id)}
+            style={{ display: 'grid', gridTemplateColumns: '84px 1fr 120px 160px 124px', alignItems: 'center',
+              width: '100%', padding: '0 18px', minHeight: 42, border: 'none',
+              borderBottom: i < rows.length - 1 ? '1px solid var(--line)' : 'none',
+              background: 'transparent', textAlign: 'left', cursor: 'pointer', transition: 'background .1s', fontFamily: 'var(--font)' }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--accent-soft)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+
+            {/* Priority badge */}
+            <div>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: pm.bg, color: pm.color }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: pm.color, flex: 'none' }} />
+                {level}
+              </span>
+            </div>
+
+            {/* Deal name */}
+            <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{deal.name}</div>
+
+            {/* Stage */}
+            <div><StageBadge stage={deal.stage} dot={false} size="sm" /></div>
+
+            {/* Why Now */}
+            <div>
+              {topReason ? (
+                <span style={{ fontSize: 12, fontWeight: 600, color: topReason.urgency === 'high' ? 'var(--neg)' : topReason.urgency === 'mid' ? 'var(--warn)' : 'var(--muted)' }}>
+                  {topReason.text}
+                </span>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
+              )}
+            </div>
+
+            {/* CFO Date */}
+            <div style={{ textAlign: 'right' }}>
+              {hasCFO ? (
+                <span className="num" style={{ fontSize: 12, fontWeight: 600, color: cfoInDays <= 14 ? 'var(--neg)' : cfoInDays <= 30 ? 'var(--warn)' : 'var(--slate)' }}>
+                  {fmtDateShort(deal.cfoDate)}
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)', marginLeft: 4 }}>({cfoInDays}d)</span>
+                </span>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
+              )}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const RANGES = [
+  { value:30,  label:'30 days' },
+  { value:90,  label:'90 days' },
+  { value:365, label:'365 days' },
+  { value:99999, label:'All time' },
+];
+
+function inWindow(dateStr, days, endOffsetDays=0){
+  if(!dateStr) return false;
+  const t = parseD(dateStr).getTime();
+  const end = TODAY.getTime() - endOffsetDays*DAY;
+  const start = end - days*DAY;
+  return t > start && t <= end;
+}
+const ADVANCED = ['Underwritten','LOI Submitted','Under Contract','LOI Lost'];
+const WON = ['Under Contract'];
+
+function windowMetrics(deals, days, endOffsetDays=0){
+  const entered = deals.filter(d=> inWindow(d.dateEntered, days, endOffsetDays));
+  const underwritten = entered.filter(d=> ADVANCED.includes(d.stage));
+  const loiSub = deals.filter(d=> inWindow(d.dateLOISubmitted, days, endOffsetDays));
+  const loiWon = deals.filter(d=> WON.includes(d.stage) && inWindow(d.dateUnderContract, days, endOffsetDays));
+  const loiLost = deals.filter(d=> d.stage==='LOI Lost' && inWindow(d.dateLost, days, endOffsetDays));
+  const sum = (arr,f)=> arr.reduce((s,d)=>s+(f(d)||0),0);
+  return {
+    entered: entered.length,
+    underwritten: underwritten.length,
+    loiSubmitted: loiSub.length,
+    loiWon: loiWon.length,
+    loiLost: loiLost.length,
+    dollarSubmitted: sum(loiSub, d=> d.loiAmount || d.purchasePrice),
+    dollarWon: sum(loiWon, d=> d.loiAmount || d.purchasePrice),
+    convRate: loiSub.length ? loiWon.length / loiSub.length : 0,
+  };
+}
+
+function MetricsView({ deals, onOpen }){
+  const [days, setDays] = useStateV(365);
+  const cur = useMemoV(()=> windowMetrics(deals, days), [deals, days]);
+  const prev = useMemoV(()=> windowMetrics(deals, days, days), [deals, days]);
+  const isAll = days===99999;
+  const d = (a,b)=> isAll ? null : (a-b);
+  const rangeLabel = RANGES.find(r=>r.value===days).label;
+
+  // funnel steps
+  const funnel = [
+    { label:'Entered Pipeline', value:cur.entered,      color:'#6b7a8d' },
+    { label:'Underwritten',     value:cur.underwritten, color:'#2f6df0' },
+    { label:'LOI Submitted',    value:cur.loiSubmitted, color:'#bd7a16' },
+    { label:'Won / Under Contract', value:cur.loiWon,   color:'#0f8a4d' },
+  ];
+  const fmax = Math.max(...funnel.map(f=>f.value), 1);
+
+  // recent LOI activity list
+  const loiActivity = deals
+    .filter(d=> d.dateLOISubmitted && inWindow(d.dateLOISubmitted, days))
+    .sort((a,b)=> b.dateLOISubmitted.localeCompare(a.dateLOISubmitted));
+
+  return (
+    <div className="fade" style={{ padding:'24px 30px 60px', maxWidth:1280, margin:'0 auto' }}>
+      <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
+        <div>
+          <h2 style={{ margin:0, fontSize:21, fontWeight:700, color:'var(--ink)' }}>Pipeline Metrics</h2>
+          <p style={{ margin:'4px 0 0', fontSize:13.5, color:'var(--muted)' }}>
+            Activity & dollar volume — {isAll ? 'all time' : 'trailing ' + rangeLabel} as of {fmtDate(window.ALTUS_TODAY)}.
+          </p>
+        </div>
+        <Seg value={days} onChange={setDays} options={RANGES}/>
+      </div>
+
+      {/* activity KPIs */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14 }}>
+        <Kpi label="Deals Entered" value={fmtNum(cur.entered)} icon="plus" accent="#6b7a8d"
+             delta={d(cur.entered,prev.entered)} sub={isAll?'in pipeline':'vs prior '+rangeLabel}/>
+        <Kpi label="Underwritten" value={fmtNum(cur.underwritten)} icon="calc" accent="#2f6df0"
+             delta={d(cur.underwritten,prev.underwritten)} sub={isAll?'completed':'vs prior period'}/>
+        <Kpi label="LOIs Submitted" value={fmtNum(cur.loiSubmitted)} icon="flag" accent="#bd7a16"
+             delta={d(cur.loiSubmitted,prev.loiSubmitted)} sub={isAll?'':'vs prior period'}/>
+        <Kpi label="LOIs Won" value={fmtNum(cur.loiWon)} icon="check" accent="#0f8a4d"
+             delta={d(cur.loiWon,prev.loiWon)} sub="under contract"/>
+      </div>
+
+      {/* dollar volume + conversion */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1.1fr', gap:14, marginTop:14 }}>
+        <Kpi label="LOI $ Submitted" value={fmtShort(cur.dollarSubmitted)} icon="dollar" accent="#bd7a16"
+             sub={fmtNum(cur.loiSubmitted)+' LOIs'}/>
+        <Kpi label="LOI $ Won" value={fmtShort(cur.dollarWon)} icon="dollar" accent="#0f8a4d"
+             sub={fmtNum(cur.loiWon)+' under contract'}/>
+        <div style={{ background:'var(--navy)', borderRadius:'var(--radius-lg)', padding:'16px 20px', color:'#fff',
+          display:'flex', alignItems:'center', justifyContent:'space-between', boxShadow:'var(--shadow)' }}>
+          <div>
+            <div style={{ fontSize:12, color:'#9fb4cf', fontWeight:600, textTransform:'uppercase', letterSpacing:'.02em' }}>LOI Conversion</div>
+            <div className="num" style={{ fontSize:30, fontWeight:700, marginTop:6 }}>{fmtPct(cur.convRate,0)}</div>
+            <div style={{ fontSize:12, color:'#9fb4cf', marginTop:4 }}>{cur.loiWon} won of {cur.loiSubmitted} submitted · {cur.loiLost} lost</div>
+          </div>
+          <Donut size={92} thickness={14} segments={[
+            { value:cur.loiWon, color:'#39d98a' },
+            { value:cur.loiLost, color:'#ff6b6e' },
+            { value:Math.max(0,cur.loiSubmitted-cur.loiWon-cur.loiLost), color:'#3a5878' },
+          ]} center={<span className="num" style={{ fontSize:14, fontWeight:700, color:'#fff' }}>{cur.loiSubmitted}</span>}/>
+        </div>
+      </div>
+
+      {/* funnel + activity */}
+      <div style={{ display:'grid', gridTemplateColumns:'1.15fr 1fr', gap:16, marginTop:16, alignItems:'start' }}>
+        <Card title="Conversion Funnel" right={<span style={{ fontSize:12, color:'var(--muted)' }}>{isAll?'all time':rangeLabel}</span>}>
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            {funnel.map((f,i)=>{
+              const prevVal = i>0 ? funnel[i-1].value : null;
+              const stepRate = prevVal ? f.value/prevVal : null;
+              return (
+                <div key={f.label}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:6 }}>
+                    <span style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{f.label}</span>
+                    <span style={{ display:'flex', gap:10, alignItems:'baseline' }}>
+                      {stepRate!=null && <span className="num" style={{ fontSize:11.5, color:'var(--muted)' }}>{fmtPct(stepRate,0)} ↓</span>}
+                      <span className="num" style={{ fontSize:16, fontWeight:700, color:f.color }}>{f.value}</span>
+                    </span>
+                  </div>
+                  <Bar value={f.value} max={fmax} color={f.color} height={10}/>
+                </div>
+              );
+            })}
+            <div style={{ display:'flex', justifyContent:'space-between', paddingTop:12, borderTop:'1px solid var(--line)', fontSize:12.5 }}>
+              <span style={{ color:'var(--muted)' }}>LOIs lost in period</span>
+              <span className="num" style={{ fontWeight:700, color:'var(--neg)' }}>{cur.loiLost}</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card title="LOI Activity" pad={false} right={<span style={{ fontSize:12, color:'var(--muted)' }}>{loiActivity.length} in range</span>}>
+          <div style={{ maxHeight:340, overflow:'auto' }}>
+            {loiActivity.length===0 && <div style={{ padding:'40px 18px', textAlign:'center', color:'var(--muted)', fontSize:13 }}>No LOIs submitted in this window.</div>}
+            {loiActivity.map(d=>(
+              <button key={d.id} onClick={()=>onOpen(d.id)} style={{ display:'flex', alignItems:'center', gap:12, width:'100%',
+                padding:'11px 18px', border:'none', borderBottom:'1px solid var(--line)', background:'transparent', textAlign:'left' }}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div className="clip" style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{d.name}</div>
+                  <div style={{ fontSize:11.5, color:'var(--muted)', marginTop:1 }}>{fmtDate(d.dateLOISubmitted)} · {d.market}</div>
+                </div>
+                <span className="num" style={{ fontSize:13, fontWeight:600, color:'var(--slate)' }}>{fmtShort(d.loiAmount||d.purchasePrice)}</span>
+                <StageBadge stage={d.stage} size="sm" dot={false}/>
+              </button>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ Analytics ============================ */
+function AnalyticsView({ deals, onOpen }){
+  const active = deals.filter(d=> d.stage!=='Pass' && d.stage!=='LOI Lost');
+  // by type
+  const byType = {};
+  active.forEach(d=>{ byType[d.type]=(byType[d.type]||0)+1; });
+  const typeSegs = Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({ label:k, value:v, color:TYPE_META[k]||'#9eabb9' }));
+  // by stage
+  const byStage = {};
+  STAGE_ALL.forEach(s=> byStage[s]=deals.filter(d=>d.stage===s).length);
+  const stageMax = Math.max(...Object.values(byStage),1);
+  // cap rate distribution buckets (going-in)
+  const caps = active.map(d=> computeMetrics(d).goingInCap).filter(c=>c>0 && c<0.15);
+  const buckets = [[0,.04],[.04,.045],[.045,.05],[.05,.055],[.055,.06],[.06,.2]];
+  const bucketLabels = ['<4.0','4.0–4.5','4.5–5.0','5.0–5.5','5.5–6.0','6.0+'];
+  const capDist = buckets.map(([lo,hi])=> caps.filter(c=> c>=lo && c<hi).length);
+  const capMax = Math.max(...capDist,1);
+  // $ by type
+  const dollarByType = {};
+  active.forEach(d=>{ dollarByType[d.type]=(dollarByType[d.type]||0)+(d.purchasePrice||0); });
+  const totalDollar = Object.values(dollarByType).reduce((a,b)=>a+b,0);
+  const avgGoingIn = caps.length ? caps.reduce((a,b)=>a+b,0)/caps.length : 0;
+
+  return (
+    <div className="fade" style={{ padding:'24px 30px 60px', maxWidth:1280, margin:'0 auto' }}>
+      <div style={{ marginBottom:20 }}>
+        <h2 style={{ margin:0, fontSize:21, fontWeight:700, color:'var(--ink)' }}>Analytics</h2>
+        <p style={{ margin:'4px 0 0', fontSize:13.5, color:'var(--muted)' }}>Composition of the active pipeline — {active.length} live deals, {fmtShort(totalDollar)} in purchase value.</p>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'start' }}>
+        <Card title="Active Pipeline by Product Type">
+          <div style={{ display:'flex', alignItems:'center', gap:26 }}>
+            <Donut size={150} thickness={22} segments={typeSegs}
+              center={<><span className="num" style={{ fontSize:24, fontWeight:700, color:'var(--ink)' }}>{active.length}</span><span style={{ fontSize:11, color:'var(--muted)' }}>deals</span></>}/>
+            <div style={{ flex:1, display:'flex', flexDirection:'column', gap:9 }}>
+              {typeSegs.map(s=>(
+                <div key={s.label} style={{ display:'flex', alignItems:'center', gap:9 }}>
+                  <span style={{ width:9, height:9, borderRadius:2, background:s.color, flex:'none' }}/>
+                  <span style={{ fontSize:13, color:'var(--slate)', flex:1 }}>{s.label}</span>
+                  <span className="num" style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{s.value}</span>
+                  <span className="num" style={{ fontSize:12, color:'var(--muted)', width:42, textAlign:'right' }}>{fmtPct(s.value/active.length,0)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        <Card title="Deals by Stage">
+          <div style={{ display:'flex', flexDirection:'column', gap:13 }}>
+            {STAGE_ALL.map(s=>(
+              <div key={s}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
+                  <span style={{ display:'flex', alignItems:'center', gap:7, fontSize:12.5, color:'var(--slate)', fontWeight:500 }}>
+                    <span style={{ width:8, height:8, borderRadius:2, background:STAGE_META[s].c }}/>{s}</span>
+                  <span className="num" style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{byStage[s]}</span>
+                </div>
+                <Bar value={byStage[s]} max={stageMax} color={STAGE_META[s].c} height={8}/>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card title="Going-In Cap Rate Distribution" right={<span className="num" style={{ fontSize:12.5, color:'var(--muted)' }}>avg {fmtPct(avgGoingIn)}</span>}>
+          <div style={{ display:'flex', alignItems:'flex-end', gap:10, height:170, padding:'8px 4px 0' }}>
+            {capDist.map((v,i)=>(
+              <div key={i} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:7, height:'100%', justifyContent:'flex-end' }}>
+                <span className="num" style={{ fontSize:12, fontWeight:600, color:'var(--ink)' }}>{v||''}</span>
+                <div style={{ width:'100%', height:(v/capMax)*120+4, background:'linear-gradient(180deg,#5b8bf5,#2f6df0)', borderRadius:'5px 5px 0 0', transition:'height .5s' }}/>
+                <span className="num" style={{ fontSize:10.5, color:'var(--muted)' }}>{bucketLabels[i]}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card title="Purchase Value by Product Type">
+          <div style={{ display:'flex', flexDirection:'column', gap:13 }}>
+            {Object.entries(dollarByType).sort((a,b)=>b[1]-a[1]).map(([k,v])=>(
+              <div key={k}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
+                  <span style={{ display:'flex', alignItems:'center', gap:7, fontSize:12.5, color:'var(--slate)', fontWeight:500 }}>
+                    <span style={{ width:8, height:8, borderRadius:2, background:TYPE_META[k]||'#9eabb9' }}/>{k}</span>
+                  <span className="num" style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{fmtShort(v)}</span>
+                </div>
+                <Bar value={v} max={totalDollar} color={TYPE_META[k]||'#9eabb9'} height={8}/>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { MetricsView, AnalyticsView, PriorityDealsWidget, windowMetrics, inWindow, RANGES });

@@ -1,0 +1,976 @@
+// app/dealDetail.jsx — deal side panel: overview, cap-rate calculators, debt, notes, OM parsed results
+const { useState: useStateD, useEffect: useEffectD, useRef: useRefD } = React;
+
+/* ── Editable number/money field ── */
+function FieldInput({ value, onChange, prefix, suffix, placeholder, align = 'right', width }) {
+  const fmt = (v) => {
+    if (v === '' || v == null) return '';
+    const [int, dec] = String(v).split('.');
+    const intF = int === '' || int === '-' ? int : Number(int).toLocaleString('en-US');
+    return dec != null ? intF + '.' + dec : intF;
+  };
+  const [txt, setTxt] = useStateD(fmt(value));
+  useEffectD(() => {
+    const curNum = txt === '' ? '' : Number(txt.replace(/[^0-9.]/g, ''));
+    const valNum = value === '' || value == null ? '' : Number(value);
+    if (curNum !== valNum) setTxt(fmt(value));
+  }, [value]);
+  const handle = (e) => {
+    let raw = e.target.value.replace(/[^0-9.]/g, '');
+    const parts = raw.split('.');
+    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+    setTxt(fmt(raw));
+    onChange(raw === '' ? '' : Number(raw));
+  };
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 0, border: '1px solid var(--line-2)',
+      borderRadius: 7, background: 'var(--panel)', overflow: 'hidden', height: 34, width: width || '100%',
+      transition: 'border-color .12s, box-shadow .12s' }}
+    onFocusCapture={(e) => {const w = e.currentTarget;w.style.borderColor = 'var(--accent)';w.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
+    onBlurCapture={(e) => {const w = e.currentTarget;w.style.borderColor = 'var(--line-2)';w.style.boxShadow = 'none';}}>
+      {prefix && <span style={{ padding: '0 0 0 10px', color: 'var(--faint)', fontSize: 12.5 }} className="num">{prefix}</span>}
+      <input className="num" value={txt} placeholder={placeholder} inputMode="decimal"
+      onChange={handle}
+      style={{ border: 'none', outline: 'none', background: 'transparent', textAlign: align, width: '100%',
+        padding: prefix ? '0 10px 0 4px' : '0 10px', fontSize: 13.5, color: 'var(--ink)', height: '100%' }} />
+      {suffix && <span style={{ padding: '0 10px 0 0', color: 'var(--faint)', fontSize: 12.5 }}>{suffix}</span>}
+    </div>);
+
+}
+
+/* ── Calculator row ── */
+function CalcRow({ kind, label, hint, children, strong, accent }) {
+  const isOut = kind === 'OUTPUT';
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 180px', alignItems: 'center', gap: 12,
+      padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
+      <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.06em',
+        color: isOut ? 'var(--accent)' : 'var(--muted)',
+        background: isOut ? 'var(--accent-soft)' : 'var(--panel-3)',
+        padding: '2px 6px', borderRadius: 4, textAlign: 'center', justifySelf: 'start',
+        textTransform: 'uppercase' }}>
+        {kind}
+      </span>
+      <div>
+        <div style={{ fontSize: 13, color: 'var(--ink)', fontWeight: strong ? 500 : 400 }}>{label}</div>
+        {hint && <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 1 }}>{hint}</div>}
+      </div>
+      <div style={{ justifySelf: 'end', width: '100%', textAlign: 'right' }}>
+        {isOut ?
+        <span className="num" style={{ fontSize: strong ? 16 : 13.5, fontWeight: strong ? 700 : 500,
+          color: accent || (strong ? 'var(--ink)' : 'var(--slate)') }}>{children}</span> :
+        children}
+      </div>
+    </div>);
+
+}
+
+function SectionHead({ icon, title, desc, right }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 2 }}>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <span style={{ width: 30, height: 30, borderRadius: 7, background: 'var(--navy)', color: '#fff', flex: 'none',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={icon} size={15} /></span>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+          {desc && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1, maxWidth: 540, fontWeight: 400 }}>{desc}</div>}
+        </div>
+      </div>
+      {right}
+    </div>);
+
+}
+
+function PerUnit({ total, units }) {
+  if (!units || !(Number(total) > 0)) return null;
+  return (
+    <div className="num" style={{ display: 'block', fontSize: 15, fontWeight: 600, color: 'var(--slate)', marginTop: 8 }}>
+      {fmtMoney(Number(total) / units)} <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)' }}>/ unit</span>
+    </div>);
+
+}
+
+function OverviewItem({ label, children, edit }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 600, letterSpacing: '.04em',
+        textTransform: 'uppercase', marginBottom: 5 }}>{label}</div>
+      {edit ? children :
+      <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>{children}</div>}
+    </div>);
+
+}
+
+/* ── OM Parsed Results Banner ── */
+/* ── Shared parsed-banner pieces ── */
+function BannerShell({ title, sub, canApply, onApplyAll, onDismiss, onReupload, children }) {
+  return (
+    <div style={{ border: '1px solid var(--pos)', borderRadius: 'var(--radius-lg)',
+      background: 'var(--pos-soft)', marginBottom: 16, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
+        borderBottom: '1px solid rgba(12,122,67,.15)' }}>
+        <span style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--pos)', color: '#fff',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+          <Icon name="check" size={14} />
+        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>{title}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 400, marginTop: 1 }}>{sub}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {canApply &&
+          <button onClick={onApplyAll} style={{ border: 'none', background: 'var(--pos)',
+            color: '#fff', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              Apply All
+            </button>
+          }
+          {onReupload &&
+          <button onClick={onReupload} title="Clear and re-upload" style={{ border: '1px solid rgba(12,122,67,.25)',
+            background: 'transparent', color: 'var(--muted)', borderRadius: 6, padding: '6px 10px',
+            fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon name="refresh" size={12} /> Re-upload
+          </button>}
+          <button onClick={onDismiss} style={{ border: '1px solid rgba(12,122,67,.25)',
+            background: 'transparent', color: 'var(--muted)', borderRadius: 6, padding: '6px 10px',
+            fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+            <Icon name="close" size={13} />
+          </button>
+        </div>
+      </div>
+      <div style={{ padding: '10px 16px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {children}
+      </div>
+    </div>);
+
+}
+
+function FoundRow({ label, display, onUse }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+      background: 'var(--panel)', borderRadius: 7, padding: '7px 11px',
+      border: '1px solid rgba(12,122,67,.12)' }}>
+      <Icon name="check" size={12} style={{ color: 'var(--pos)', flex: 'none' }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 8 }}>{label}</span>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{display}</span>
+      </div>
+      {onUse &&
+      <button onClick={onUse} style={{ border: 'none', background: 'var(--pos)', color: '#fff',
+        borderRadius: 5, padding: '3px 9px', fontSize: 11, fontWeight: 600, cursor: 'pointer', flex: 'none' }}>
+          Use
+        </button>
+      }
+    </div>);
+
+}
+
+function MissingRow({ label, note }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+      background: 'var(--warn-soft)', borderRadius: 7, padding: '7px 11px',
+      border: '1px solid rgba(184,114,20,.2)' }}>
+      <Icon name="flag" size={12} style={{ color: 'var(--warn)', flex: 'none' }} />
+      <div>
+        <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)', marginLeft: 8, fontStyle: 'italic' }}>{note || 'not found — enter manually'}</span>
+      </div>
+    </div>);
+
+}
+
+const fmtMoneyRaw = (v) => v != null && v !== '' ? '$' + Number(v).toLocaleString() : null;
+
+/* ── Parse error / empty-result banner ── */
+function ParseErrorBanner({ label, error }) {
+  const [dismissed, setDismissed] = useStateD(false);
+  if (dismissed) return null;
+  return (
+    <div style={{ border: '1px solid var(--neg)', borderRadius: 'var(--radius-lg)', background: 'var(--neg-soft)',
+      marginBottom: 16, padding: '12px 16px', display: 'flex', alignItems: 'flex-start', gap: 11 }}>
+      <span style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--neg)', color: '#fff', flex: 'none',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={13} /></span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--neg)' }}>{label} couldn’t be parsed</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5 }}>
+          {error || 'No data could be extracted from this file.'}
+          <br />Re-upload it, or export the document as a PDF or Excel/CSV with a clear column-header row (e.g. Unit · Status · Market Rent · Rent).
+        </div>
+      </div>
+      <button onClick={() => setDismissed(true)} style={{ border: '1px solid rgba(192,42,42,.25)',
+        background: 'transparent', color: 'var(--muted)', borderRadius: 6, padding: '5px 9px', fontSize: 12, cursor: 'pointer', flex: 'none' }}>
+        <Icon name="close" size={12} />
+      </button>
+    </div>);
+
+}
+
+/* ── OM Parsed Results Banner ── */
+function OMParsedSection({ parsed, deal, onAccept }) {
+  const [dismissed, setDismissed] = useStateD(false);
+  if (dismissed) return null;
+
+  const _rawC = Array.isArray(parsed.brokerContacts) ? parsed.brokerContacts :
+  Array.isArray(parsed.isrContacts) ? parsed.isrContacts : [];
+  const _named = _rawC.filter((c) => c && c.name);
+  const _withInfo = _named.filter((c) => c.email || c.phone);
+  const contacts = (_withInfo.length ? _withInfo : _named).slice(0, 6);
+  const firstContact = contacts[0];
+  const brokerStr = (name) => [parsed.brokerFirm, name].filter(Boolean).join(' — ');
+
+  const FIELD_DEFS = [
+  { key: 'name', label: 'Property Name', patch: (v) => ({ name: v }) },
+  { key: 'market', label: 'Location', patch: (v) => ({ market: v }) },
+  { key: 'units', label: 'Units', patch: (v) => ({ units: Number(v) || v }) },
+  { key: 'vintage', label: 'Vintage (Year Built)', patch: (v) => ({ vintage: String(v) }) },
+  { key: 'effectiveGrossIncome', label: 'Effective Gross Income (in-place)', patch: (v) => ({ trailingEGI: Number(v) || v }), fmt: fmtMoneyRaw },
+  { key: 'totalOpex', label: 'Total Operating Expenses' + (parsed.opexBasis ? ' · ' + parsed.opexBasis : ''), patch: (v) => ({ currentOpexTotal: Number(v) || v }), fmt: fmtMoneyRaw },
+  { key: 'brokerEGI', label: 'Pro Forma EGI (annual)', patch: (v) => ({ brokerEGI: Number(v) || v }), fmt: fmtMoneyRaw },
+  { key: 'brokerFirm', label: 'Broker Firm', patch: (v) => ({ broker: brokerStr(firstContact?.name) }) }];
+
+
+  // Current OpEx / Unit is DERIVED (total operating expenses ÷ units) — shown for confirmation,
+  // not applied directly (the underwriting card recomputes it from the figures above).
+  const opexUnits = deal && deal.units ? deal.units : Number(parsed.units) || null;
+  const opexPerUnit = parsed.totalOpex != null && parsed.totalOpex !== '' && opexUnits ?
+  Math.round(Number(parsed.totalOpex) / opexUnits) : null;
+
+  const found = FIELD_DEFS.filter((f) => parsed[f.key] != null && parsed[f.key] !== '');
+  const missing = FIELD_DEFS.filter((f) => parsed[f.key] == null || parsed[f.key] === '');
+  const totalFields = FIELD_DEFS.length + 1; // +1 for broker contacts
+  const foundCount = found.length + (contacts.length ? 1 : 0);
+
+  const acceptAll = () => {
+    let patch = {};
+    found.forEach((f) => Object.assign(patch, f.patch(parsed[f.key])));
+    if (firstContact) patch.broker = brokerStr(firstContact.name);
+    onAccept(patch);
+    setDismissed(true);
+  };
+
+  return (
+    <BannerShell title="OM Parsed"
+    sub={`${foundCount} of ${totalFields} fields extracted${foundCount < totalFields ? ` · ${totalFields - foundCount} need manual entry` : ''}`}
+    canApply={foundCount > 0} onApplyAll={acceptAll} onDismiss={() => setDismissed(true)}>
+      {found.map((f) =>
+      <FoundRow key={f.key} label={f.label}
+      display={f.fmt ? f.fmt(parsed[f.key]) : String(parsed[f.key])}
+      onUse={() => onAccept(f.patch(parsed[f.key]))} />
+      )}
+      {opexPerUnit != null &&
+      <FoundRow label={'Current OpEx / Unit · ' + opexUnits + ' units'} display={fmtMoneyRaw(opexPerUnit)} />
+      }
+      {contacts.map((c, i) =>
+      <FoundRow key={'c' + i} label="Broker Contact"
+      display={[c.name, c.title, c.phone, c.email].filter(Boolean).join(' · ')}
+      onUse={() => onAccept({ broker: brokerStr(c.name) })} />
+      )}
+      {missing.map((f) => <MissingRow key={f.key} label={f.label} />)}
+      {contacts.length === 0 && <MissingRow label="Broker Contact" />}
+    </BannerShell>);
+
+}
+
+/* ── full-page detail building blocks ── */
+const Sep = () => <span style={{ color: 'var(--faint)', margin: '0 9px' }}>·</span>;
+
+function DateInput({ value, onChange }) {
+  return (
+    <input type="date" value={value || ''} onChange={(e) => onChange(e.target.value || null)}
+    style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px',
+      background: 'var(--panel)', fontSize: 13, height: 34, width: '100%', boxSizing: 'border-box',
+      color: 'var(--ink)', fontFamily: 'var(--font)' }}
+    onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
+    onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />);
+
+}
+
+/* read-only labelled value used inside the Deal Information card */
+function DField({ label, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 600, letterSpacing: '.05em',
+        textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{children}</div>
+    </div>);
+
+}
+/* labelled editable field (input lives in children) */
+function EField({ label, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 600, letterSpacing: '.05em',
+        textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
+      {children}
+    </div>);
+
+}
+
+/* white card with an uppercase header + optional hint */
+function PanelCard({ title, hint, children }) {
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)',
+      borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)' }}>
+      <div style={{ padding: '16px 20px 0', display: 'flex', alignItems: 'baseline', gap: 11, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--ink)' }}>{title}</span>
+        {hint && <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>{hint}</span>}
+      </div>
+      <div style={{ padding: '16px 20px 20px' }}>{children}</div>
+    </div>);
+
+}
+
+/* right-rail card */
+function RailCard({ icon, title, children }) {
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)',
+      borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+      <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--line)',
+        display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Icon name={icon} size={13} style={{ color: 'var(--muted)' }} />
+        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted)' }}>{title}</span>
+      </div>
+      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 13 }}>{children}</div>
+    </div>);
+
+}
+function RailRow({ label, value, num = true, muted }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 2 }}>{label}</div>
+      <div className={num ? 'num' : undefined} style={{ fontSize: 14, fontWeight: 600,
+        color: muted ? 'var(--faint)' : 'var(--ink)' }}>{value}</div>
+    </div>);
+
+}
+
+/* numbered stage stepper */
+function StageStepper({ stage, onChange }) {
+  const idx = STAGES.indexOf(stage);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      {STAGES.map((s, i) => {
+        const active = i === idx;
+        return (
+          <React.Fragment key={s}>
+            {i > 0 && <div style={{ width: 34, height: 1, background: 'var(--line-2)' }} />}
+            <button onClick={() => onChange(s)} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 9, padding: '6px 14px 6px 7px', borderRadius: 999,
+              border: active ? '1px solid var(--accent)' : '1px solid transparent',
+              background: active ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <span className="num" style={{ width: 21, height: 21, borderRadius: 999, flex: 'none',
+                background: active ? 'var(--accent)' : 'var(--panel-3)', color: active ? '#fff' : 'var(--muted)',
+                fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+              <span style={{ fontSize: 12.5, fontWeight: active ? 700 : 500, color: active ? 'var(--accent)' : 'var(--slate)' }}>{STAGE_META[s].label}</span>
+            </button>
+          </React.Fragment>);
+
+      })}
+    </div>);
+
+}
+
+/* full-bleed 5-up KPI strip + optional returns row */
+function KpiStrip({ deal, m }) {
+  // Full UW takes precedence when its income section is filled: going-in cap = Year 1
+  // yield-on-cost, stabilized cap = Year 3 YOC (stabilization year). Otherwise the
+  // Quick UW cap-rate math (computeMetrics) drives both. Asterisk notes the source.
+  const fullUW = window.hasUWInputs ? window.hasUWInputs(deal) : false;
+  const uw = fullUW && window.computeUW ? window.computeUW(deal) : null;
+  const y1 = uw && uw.rows[1] ? uw.rows[1].yieldOnCost : null;
+  const y3row = uw ? (uw.rows[3] || uw.rows[uw.rows.length - 1]) : null;
+  const y3 = y3row ? y3row.yieldOnCost : null;
+
+  const goingIn = uw && y1 != null ? y1 : m.goingInCap;
+  const stab = uw && y3 != null ? y3 : m.stabilizedCap;
+  const capSrc = uw ? 'Full UW' : 'Quick UW';
+
+  const priceCells = [
+  { label: 'Ask Price', value: deal.askPrice ? fmtShort(deal.askPrice) : '—' },
+  { label: 'UW Price', value: deal.purchasePrice ? fmtShort(deal.purchasePrice) : '—' },
+  { label: 'Going-In Cap*', value: fmtPct(goingIn), color: goingIn ? 'var(--accent)' : 'var(--faint)',
+    sub: (uw ? 'Yr 1 YOC · ' : '') + capSrc + '*' },
+  { label: 'Stabilized Cap*', value: fmtPct(stab), color: stab ? 'var(--pos)' : 'var(--faint)',
+    sub: (uw ? 'Yr 3 YOC · ' : '') + capSrc + '*' },
+  { label: 'Total Basis', value: fmtShort(m.totalBasis), color: m.totalBasis ? 'var(--ink)' : 'var(--faint)' }];
+
+  // Returns only render once the Income & Economic Vacancy section is populated.
+  const retCells = uw ? [
+  { label: 'Levered IRR', value: uw.irr == null ? '—' : (uw.irr * 100).toFixed(1) + '%', color: uw.irr == null ? 'var(--faint)' : 'var(--pos)', ret: true },
+  { label: 'Equity Mult.', value: uw.equityMultiple == null ? '—' : uw.equityMultiple.toFixed(2) + 'x', color: 'var(--ink)', ret: true },
+  { label: 'Avg Yield', value: uw.avgYield == null ? '—' : (uw.avgYield * 100).toFixed(1) + '%', color: uw.avgYield == null ? 'var(--faint)' : 'var(--accent)', ret: true }] :
+  [];
+  const cells = [...priceCells, ...retCells];
+
+  return (
+    <div style={{ display: 'flex', borderTop: '1px solid var(--line)', overflow: 'hidden' }}>
+      {cells.map((c, i) =>
+      <div key={i} style={{
+        flex: '1 1 0', minWidth: 0, padding: '11px 16px',
+        borderLeft: i === 0 ? 'none' : c.ret && !cells[i - 1].ret ? '2px solid var(--accent)' : '1px solid var(--line)',
+        background: c.ret ? 'var(--panel-2)' : 'transparent' }}>
+          <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}</div>
+          <div className="num" style={{ fontSize: 19, fontWeight: 700, lineHeight: 1, color: c.color || 'var(--ink)' }}>{c.value}</div>
+          {c.sub &&
+          <div style={{ fontSize: 9.5, fontWeight: 500, color: 'var(--faint)', marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.sub}</div>}
+        </div>
+      )}
+    </div>);
+
+}
+
+/* tab bar */
+function DetailTabs({ tab, setTab }) {
+  const tabs = [
+  { key: 'summary', label: 'Summary', icon: 'deal' },
+  { key: 'quickuw', label: 'Quick UW', icon: 'target' },
+  { key: 'fulluw', label: 'Full UW', icon: 'calc' },
+  { key: 'returns', label: 'Returns', icon: 'chart' },
+  { key: 'market', label: 'Property / Submarket Review', icon: 'pulse' },
+  { key: 'location', label: 'Location', icon: 'search' },
+  { key: 'notes', label: 'Notes', icon: 'note' }];
+
+  return (
+    <div style={{ display: 'flex', gap: 4, padding: '0 28px', borderTop: '1px solid var(--line)' }}>
+      {tabs.map((t) => {
+        const on = tab === t.key;
+        return (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7, padding: '13px 12px', border: 'none', background: 'none',
+            borderBottom: on ? '2px solid var(--accent)' : '2px solid transparent', marginBottom: -1,
+            color: on ? 'var(--accent)' : 'var(--muted)', fontSize: 13.5, fontWeight: on ? 600 : 500, cursor: 'pointer' }}
+          onMouseEnter={(e) => {if (!on) e.currentTarget.style.color = 'var(--slate)';}}
+          onMouseLeave={(e) => {if (!on) e.currentTarget.style.color = 'var(--muted)';}}>
+            <Icon name={t.icon} size={15} />{t.label}
+          </button>);
+
+      })}
+    </div>);
+
+}
+
+/* shared notes editor */
+function NotesEditor({ value, onChange, minHeight = 140 }) {
+  return (
+    <textarea value={value || ''} onChange={(e) => onChange(e.target.value)}
+    placeholder="Add notes — underwriting rationale, broker conversations, pricing guidance, next steps…"
+    style={{ width: '100%', minHeight, resize: 'vertical',
+      border: '1px solid var(--line-2)', borderRadius: 8, padding: '12px 14px',
+      fontSize: 13, lineHeight: 1.65, background: 'var(--panel-2)', outline: 'none',
+      color: 'var(--ink)', fontWeight: 400, fontFamily: 'var(--font)', boxSizing: 'border-box' }}
+    onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.background = 'var(--panel)';}}
+    onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.background = 'var(--panel-2)';}} />);
+
+}
+
+const GMAPS_KEY = 'AIzaSyAyKErMh7ozzT62GLwjdgUJscLeEJIlRv0';
+window.GMAPS_KEY = GMAPS_KEY;
+
+function LocationView({ deal, set }) {
+  const seed = deal.locationQuery || [deal.name, deal.market].filter(Boolean).join(', ');
+  const [q, setQ] = useStateD(seed);
+  const [coords, setCoords] = useStateD(null); // {lat,lng}
+  const [geo, setGeo] = useStateD('idle'); // idle | loading | ok | fail
+  const [active, setActive] = useStateD(seed); // last submitted query
+  const [svPano, setSvPano] = useStateD(null); // resolved Street View panorama id
+  const [svStatus, setSvStatus] = useStateD('idle'); // idle | loading | ok | none
+
+  /* Geocode via Google Geocoding API */
+  useEffectD(() => {
+    if (!active) {setGeo('idle');setCoords(null);return;}
+    let cancelled = false;
+    setGeo('loading');setCoords(null);
+    fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(active)}&key=${GMAPS_KEY}`).
+    then((r) => r.json()).
+    then((data) => {
+      if (cancelled) return;
+      if (data.status === 'OK' && data.results[0]) {
+        const loc = data.results[0].geometry.location;
+        setCoords({ lat: loc.lat, lng: loc.lng });
+        setGeo('ok');
+      } else {setGeo('fail');}
+    }).
+    catch(() => {if (!cancelled) setGeo('fail');});
+    return () => {cancelled = true;};
+  }, [active]);
+
+  const submit = () => {const v = q.trim();if (v) {setActive(v);set('locationQuery', v);}};
+
+  /* Find the nearest OUTDOOR street panorama for the geocoded point. The embed alone
+     snaps to any nearby photo (often a user photosphere, or nothing at a complex's
+     rooftop centroid); the metadata lookup pins a real street-level pano within ~150m. */
+  useEffectD(() => {
+    if (!coords) {setSvStatus('idle');setSvPano(null);return;}
+    let cancelled = false;
+    setSvStatus('loading');setSvPano(null);
+    fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?location=${coords.lat},${coords.lng}&source=outdoor&radius=160&key=${GMAPS_KEY}`).
+    then((r) => r.json()).
+    then((d) => {
+      if (cancelled) return;
+      if (d.status === 'OK' && d.pano_id) {setSvPano(d.pano_id);setSvStatus('ok');} else
+      setSvStatus('none');
+    }).
+    catch(() => {if (!cancelled) setSvStatus('none');});
+    return () => {cancelled = true;};
+  }, [coords]);
+
+  /* Maps Embed API v1 — requires key, never blocked */
+  const mapSrc = active ?
+  `https://www.google.com/maps/embed/v1/place?key=${GMAPS_KEY}&q=${encodeURIComponent(active)}&zoom=15` :
+  null;
+  const svSrc = svPano ?
+  `https://www.google.com/maps/embed/v1/streetview?key=${GMAPS_KEY}&pano=${svPano}&heading=0&pitch=0&fov=80` :
+  null;
+  const extLink = coords ?
+  `https://www.google.com/maps/@${coords.lat},${coords.lng},17z` :
+  `https://www.google.com/maps/search/${encodeURIComponent(active || '')}`;
+
+  const panel = { position: 'relative', height: 400, borderRadius: 8, overflow: 'hidden',
+    border: '1px solid var(--line)', background: 'var(--panel-2)', width: '100%' };
+  const ph = { ...panel, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexDirection: 'column', gap: 9 };
+  const cap = { fontSize: 10.5, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase',
+    color: 'var(--muted)', marginBottom: 8 };
+
+  return (
+    <PanelCard title="Location" hint={deal.market || 'Market not set'}>
+      <div style={{ display: 'flex', gap: 9, marginBottom: 18 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {if (e.key === 'Enter') submit();}}
+        placeholder="Property name + address, or city, state"
+        style={{ flex: 1, border: '1px solid var(--line-2)', borderRadius: 8, padding: '0 13px',
+          height: 38, background: 'var(--panel)', fontSize: 13.5, color: 'var(--ink)',
+          fontFamily: 'var(--font)', boxSizing: 'border-box', outline: 'none' }}
+        onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
+        onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
+        <button onClick={submit}
+        style={{ border: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 8,
+          padding: '0 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', height: 38,
+          fontFamily: 'var(--font)', flex: 'none' }}>
+          {geo === 'loading' ? 'Locating…' : 'Locate'}
+        </button>
+        <a href={extLink} target="_blank" rel="noreferrer"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--line-2)',
+          borderRadius: 8, padding: '0 14px', fontSize: 13, fontWeight: 500, color: 'var(--slate)',
+          textDecoration: 'none', height: 38, flex: 'none', whiteSpace: 'nowrap' }}>
+          <Icon name="search" size={13} /> Open in Maps
+        </a>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+        <div>
+          <div style={cap}>Map View</div>
+          {mapSrc ?
+          <iframe title="map" src={mapSrc} style={panel} loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade" allowFullScreen></iframe> :
+
+          <div style={ph}>
+              <Icon name="search" size={26} style={{ color: 'var(--faint)' }} />
+              <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Enter a location above</span>
+            </div>
+          }
+        </div>
+        <div>
+          <div style={cap}>Street View</div>
+          {svStatus === 'ok' && svSrc ?
+          <iframe title="street-view" src={svSrc} style={panel} loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade" allowFullScreen></iframe> :
+          geo === 'loading' || svStatus === 'loading' ?
+          <div style={ph}>
+              <div style={{ width: 22, height: 22, borderRadius: '50%', border: '3px solid var(--accent)',
+              borderTopColor: 'transparent', animation: 'spin .8s linear infinite' }} />
+              <span style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>Finding street view…</span>
+            </div> :
+          svStatus === 'none' ?
+          <div style={ph}>
+              <Icon name="search" size={26} style={{ color: 'var(--faint)' }} />
+              <span style={{ fontSize: 12.5, color: 'var(--muted)', textAlign: 'center',
+              maxWidth: 260, lineHeight: 1.6 }}>
+                No street-level imagery within ~150m of this point.<br />Try a more specific street address.
+              </span>
+            </div> :
+          geo === 'fail' ?
+          <div style={ph}>
+              <Icon name="search" size={26} style={{ color: 'var(--faint)' }} />
+              <span style={{ fontSize: 12.5, color: 'var(--muted)', textAlign: 'center',
+              maxWidth: 260, lineHeight: 1.6 }}>
+                No street-view panorama found.<br />Try a specific street address.
+              </span>
+            </div> :
+
+          <div style={ph}>
+              <Icon name="search" size={26} style={{ color: 'var(--faint)' }} />
+              <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Locate a property to load street view</span>
+            </div>
+          }
+        </div>
+      </div>
+      {coords &&
+      <div className="num" style={{ marginTop: 10, fontSize: 11.5, color: 'var(--faint)', textAlign: 'right' }}>
+          {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+        </div>
+      }
+    </PanelCard>);
+
+}
+/* Inline-editable deal title — click to edit, Enter or blur to save, Esc to cancel. */
+function EditableTitle({ value, onCommit }) {
+  const [editing, setEditing] = useStateD(false);
+  const [draft, setDraft] = useStateD(value || '');
+  const inputRef = React.useRef(null);
+  useEffectD(() => { if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); } }, [editing]);
+  const commit = () => { const v = draft.trim(); if (v && v !== value) onCommit(v); setEditing(false); };
+  const cancel = () => { setDraft(value || ''); setEditing(false); };
+  const titleStyle = { margin: 0, fontSize: 24, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-.015em', textWrap: 'pretty', fontFamily: 'var(--font)' };
+  if (editing) {
+    return (
+      <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); else if (e.key === 'Escape') cancel(); }}
+        style={{ ...titleStyle, width: '100%', boxSizing: 'border-box', background: 'var(--panel)',
+          border: '1px solid var(--accent)', borderRadius: 8, padding: '3px 9px', outline: 'none',
+          boxShadow: '0 0 0 3px var(--accent-soft)' }} />
+    );
+  }
+  return (
+    <h1 onClick={() => { setDraft(value || ''); setEditing(true); }} title="Click to rename"
+      style={{ ...titleStyle, cursor: 'text', display: 'inline-flex', alignItems: 'center', gap: 9, borderRadius: 8, padding: '3px 9px', margin: '-3px -9px' }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--panel-2)'; const p = e.currentTarget.querySelector('[data-pen]'); if (p) p.style.opacity = '1'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; const p = e.currentTarget.querySelector('[data-pen]'); if (p) p.style.opacity = '0'; }}>
+      <span className="clip">{value || 'Untitled deal'}</span>
+      <span data-pen style={{ opacity: 0, transition: 'opacity .12s', color: 'var(--faint)', flex: 'none', display: 'inline-flex' }}>
+        <Icon name="edit" size={15} />
+      </span>
+    </h1>
+  );
+}
+function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMUpload,
+  t12Data, rrData, onT12Upload, onRRUpload, onClearOM, onClearT12, onClearRR,
+  onRunMarketReview, onRunMemo,
+  todos, onAddTodo, onPatchTodo, onDeleteTodo, onViewTasks }) {
+  const [tab, setTab] = useStateD('summary');
+  const [sticky, setSticky] = useStateD(false);
+  const titleSentinelRef = useRefD(null);
+  useEffectD(() => {
+    const el = titleSentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([e]) => setSticky(!e.isIntersecting), { threshold: 0 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  const set = (k, v) => onPatch(deal.id, { [k]: v });
+  const UploadBtn = window.OMBtn;
+  const T12Banner = window.T12ParsedSection;
+  const RRBanner = window.RentRollParsedSection;
+  const DOC_ACCEPT = '.pdf,.csv,.txt,.xlsx,.xls,.xlsm,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
+  // Broker contacts tied to THIS deal — explicit OM linkage (dealIds), assigned primary
+  // contact, or a last-name match against the deal's broker field. This is the "who do I
+  // reach out to for this deal" list.
+  const dealContacts = (Array.isArray(contacts) ? contacts : []).filter((c) => {
+    const ids = Array.isArray(c.dealIds) ? c.dealIds : [];
+    const lastName = (c.name || '').trim().split(' ').pop().toLowerCase();
+    const lastNameRe = lastName.length > 2 ? new RegExp('\\b' + lastName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i') : null;
+    return ids.includes(deal.id) ||
+    deal.contactId && deal.contactId === c.id ||
+    (lastNameRe && lastNameRe.test(deal.broker || ''));
+  });
+  const m = computeMetrics(deal);
+  const capDelta = m.stabilizedCap - m.goingInCap;
+  const hasDebt = !!deal.debt;
+  const days = daysAgo(deal.dateEntered);
+  const inputW = 'repeat(3,1fr)';
+
+  const anyParsed = omData?.status === 'done' && omData.parsed ||
+  t12Data?.status === 'done' && t12Data.parsed ||
+  rrData?.status === 'done' && rrData.parsed;
+  const anyError = omData?.status === 'error' || t12Data?.status === 'error' || rrData?.status === 'error';
+
+  return (
+    <div className="fade" style={{ height: '100%', overflow: 'auto', background: 'var(--bg)' }}>
+      {/* Sticky deal-name bar — appears once you scroll past the title */}
+      {sticky && (
+        <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--panel)',
+          borderBottom: '1px solid var(--line)', padding: '8px 28px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14,
+          boxShadow: '0 2px 8px rgba(15,23,32,.07)', animation: 'fadeIn .12s ease' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            <button onClick={onBack} style={{ border: 'none', background: 'none', color: 'var(--accent)',
+              fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 12.5, flex: 'none' }}>Pipeline</button>
+            <Icon name="chevR" size={12} style={{ color: 'var(--faint)', flex: 'none' }} />
+            <span className="clip" style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)', maxWidth: 320, flex: 'none' }}>{deal.name}</span>
+            <span style={{ width: 1, height: 18, background: 'var(--line)', flex: 'none' }} />
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: 'var(--muted)', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <span style={{ flex: 'none' }}>{deal.type}</span>
+              <Sep /><span style={{ flex: 'none' }}>{deal.market || '—'}</span>
+              {deal.units ? <><Sep /><span className="num" style={{ flex: 'none' }}>{fmtNum(deal.units)} units</span></> : null}
+              {deal.vintage ? <><Sep /><span className="num" style={{ flex: 'none' }}>Built {deal.vintage}</span></> : null}
+            </div>
+          </div>
+          <select value={deal.stage} onChange={(e) => set('stage', e.target.value)}
+            style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '5px 9px',
+              background: 'var(--panel)', fontSize: 12.5, fontWeight: 600, flex: 'none',
+              color: (STAGE_META[deal.stage] || STAGE_META['New Deal']).c, cursor: 'pointer' }}>
+            {STAGE_ALL.map((s) => <option key={s} value={s}>{STAGE_META[s].label}</option>)}
+          </select>
+        </div>
+      )}
+
+      {/* ===== White header block ===== */}
+      <div style={{ background: 'var(--panel)' }}>
+        <div style={{ padding: '14px 28px 0' }}>
+          {/* breadcrumb + stage select */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, minWidth: 0 }}>
+              <button onClick={onBack} style={{ border: 'none', background: 'none', color: 'var(--accent)',
+                fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 12.5 }}>Pipeline</button>
+              <Icon name="chevR" size={12} style={{ color: 'var(--faint)', flex: 'none' }} />
+              <span className="clip" style={{ color: 'var(--muted)', maxWidth: 440 }}>{deal.name}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 'none' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Stage</span>
+              <select value={deal.stage} onChange={(e) => set('stage', e.target.value)}
+              style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '6px 9px',
+                background: 'var(--panel)', fontSize: 12.5, fontWeight: 600,
+                color: (STAGE_META[deal.stage] || STAGE_META['New Deal']).c, cursor: 'pointer' }}>
+                {STAGE_ALL.map((s) => <option key={s} value={s}>{STAGE_META[s].label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* title + days pill */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+            <div style={{ minWidth: 0 }}>
+              <div ref={titleSentinelRef} style={{ position: 'absolute', top: 0, left: 0, height: 1, width: 1, pointerEvents: 'none' }} />
+              <EditableTitle value={deal.name} onCommit={(v)=>set('name', v)} />
+              <div style={{ display: 'flex', alignItems: 'center', marginTop: 9, fontSize: 13, color: 'var(--muted)', flexWrap: 'wrap' }}>
+                <TypeTag type={deal.type} />
+                <Sep /><span>{deal.market || '—'}</span>
+                {deal.units ? <><Sep /><span className="num">{fmtNum(deal.units)} units</span></> : null}
+                {deal.vintage ? <><Sep /><span className="num">Built {deal.vintage}</span></> : null}
+                {deal.broker ? <><Sep /><span className="clip" style={{ maxWidth: 280 }}>{deal.broker}</span></> : null}
+              </div>
+            </div>
+            <div style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 7,
+              border: '1px solid var(--line)', borderRadius: 999, padding: '7px 15px', background: 'var(--panel-2)' }}>
+              <Icon name="clock" size={13} style={{ color: 'var(--muted)' }} />
+              <span className="num" style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{days != null ? days : 0}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>days in pipeline</span>
+            </div>
+          </div>
+
+          {/* documents */}
+          {onOMUpload && UploadBtn &&
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 10.5, color: 'var(--muted)', fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase' }}>Documents</span>
+              <UploadBtn dealId={deal.id} om={omData} onUpload={onOMUpload} onOpenDeal={() => {}} label="OM" accept=".pdf,application/pdf" />
+              {onT12Upload && <UploadBtn dealId={deal.id} om={t12Data} onUpload={onT12Upload} onOpenDeal={() => {}} label="T-12" accept={DOC_ACCEPT} />}
+              {onRRUpload && <UploadBtn dealId={deal.id} om={rrData} onUpload={onRRUpload} onOpenDeal={() => {}} label="Rent Roll" accept={DOC_ACCEPT} />}
+            </div>
+          }
+
+          {/* stepper */}
+          <div style={{ padding: '16px 0 15px' }}>
+            <StageStepper stage={deal.stage} onChange={(s) => set('stage', s)} />
+          </div>
+        </div>
+
+        {/* KPI strip */}
+        <KpiStrip deal={deal} m={m} />
+
+        {/* tabs */}
+        <DetailTabs tab={tab} setTab={setTab} />
+      </div>
+
+      {/* ===== Body ===== */}
+      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
+
+        {/* parsed banners (always visible, regardless of tab) */}
+        {(anyParsed || anyError) &&
+        <div style={{ marginBottom: 18 }}>
+            {omData?.status === 'done' && omData.parsed &&
+          <OMParsedSection parsed={omData.parsed} deal={deal}
+          onReupload={onClearOM ? () => onClearOM(deal.id) : null}
+          onAccept={(fields) => onAcceptOM && onAcceptOM(deal.id, fields)} />
+          }
+            {t12Data?.status === 'done' && t12Data.parsed && T12Banner &&
+          <T12Banner parsed={t12Data.parsed}
+          onReupload={onClearT12 ? () => onClearT12(deal.id) : null}
+          onAccept={(fields) => onAcceptOM && onAcceptOM(deal.id, fields)} />
+          }
+            {rrData?.status === 'done' && rrData.parsed && RRBanner &&
+          <RRBanner parsed={rrData.parsed}
+          onReupload={onClearRR ? () => onClearRR(deal.id) : null}
+          onAccept={(fields) => onAcceptOM && onAcceptOM(deal.id, fields)} />
+          }
+            {omData?.status === 'error' && <ParseErrorBanner label="OM" error={omData.error} />}
+            {t12Data?.status === 'error' && <ParseErrorBanner label="T-12" error={t12Data.error} />}
+            {rrData?.status === 'error' && <ParseErrorBanner label="Rent Roll" error={rrData.error} />}
+          </div>
+        }
+
+        {/* ===== SUMMARY ===== */}
+        {tab === 'summary' &&
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 318px', gap: 18, alignItems: 'start' }}>
+            {/* main column */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <PanelCard title="Deal Information" hint="Edit any field — underwriting recalculates live">
+                <div style={{ display: 'grid', gridTemplateColumns: inputW, gap: '20px 24px' }}>
+                  <EField label="Asset Type">
+                    <select value={deal.type || 'Multifamily'} onChange={(e) => set('type', e.target.value)}
+                  style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+                    fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)', cursor: 'pointer' }}>
+                      {Object.keys(window.TYPE_META).map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </EField>
+                  <EField label="Market">
+                    <input value={deal.market || ''} onChange={(e) => set('market', e.target.value)} placeholder="City, State"
+                  style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+                    fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
+                  onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
+                  onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
+                  </EField>
+                  <EField label="Vintage">
+                    <input value={deal.vintage || ''} onChange={(e) => set('vintage', e.target.value)} placeholder="Year built"
+                  style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+                    fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
+                  onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
+                  onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
+                  </EField>
+                  <EField label="Broker Firm">
+                    <input value={deal.broker || ''} onChange={(e) => set('broker', e.target.value)} placeholder="Brokerage / team"
+                  style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+                    fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
+                  onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
+                  onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
+                  </EField>
+                  <EField label={dealContacts.length > 1 ? 'Broker Contacts' : 'Broker Contact'}>
+                    {dealContacts.length ?
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {dealContacts.map((c) =>
+                    <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            <span style={{ fontWeight: 600, color: 'var(--ink)' }}>
+                              {c.name || '—'}{c.title ? <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {c.title}</span> : null}
+                            </span>
+                            {(c.email || c.phone) &&
+                      <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>
+                                {c.email ? <a href={`mailto:${c.email}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{c.email}</a> : null}
+                                {c.email && c.phone ? '   ·   ' : ''}
+                                {c.phone || ''}
+                              </span>
+                      }
+                          </div>
+                    )}
+                      </div> :
+
+                  <input value={deal.brokerContact || ''} onChange={(e) => set('brokerContact', e.target.value)}
+                  placeholder="Name · title · phone · email"
+                  style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+                    fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
+                  onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
+                  onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
+                  }
+                  </EField>
+                  <EField label="Units"><FieldInput value={deal.units} onChange={(v) => set('units', v || 0)} align="left" /></EField>
+                </div>
+              </PanelCard>
+
+              <PanelCard title="Key Dates" hint="Pipeline milestones drive the Metrics & Analytics views">
+                <div style={{ display: 'grid', gridTemplateColumns: inputW, gap: '20px 24px' }}>
+                  <EField label="Date Entered"><DateInput value={deal.dateEntered} onChange={(v) => set('dateEntered', v)} /></EField>
+                  <EField label="CFO Date"><DateInput value={deal.cfoDate} onChange={(v) => set('cfoDate', v)} /></EField>
+                  <EField label="LOI Submitted"><DateInput value={deal.dateLOISubmitted} onChange={(v) => set('dateLOISubmitted', v)} /></EField>
+                  <EField label="LOI Amount"><FieldInput value={deal.loiAmount} onChange={(v) => set('loiAmount', v || 0)} prefix="$" /></EField>
+                  <EField label="Under Contract"><DateInput value={deal.dateUnderContract} onChange={(v) => set('dateUnderContract', v)} /></EField>
+                  <EField label="Date Lost"><DateInput value={deal.dateLost} onChange={(v) => set('dateLost', v)} /></EField>
+                </div>
+              </PanelCard>
+
+              <PanelCard title="Status" hint="current deal status — shown in the pipeline">
+                <input value={deal.status || ''} onChange={(e) => set('status', e.target.value)}
+                  placeholder="e.g. Awaiting BOV, call seller Mon, LOI at $14.2M…"
+                  style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--line-2)', borderRadius: 8,
+                    padding: '0 12px', height: 40, background: 'var(--panel)', fontSize: 13.5, color: 'var(--ink)', fontFamily: 'var(--font)', outline: 'none' }}
+                  onFocus={(e) => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)'; }}
+                  onBlur={(e) => { e.target.style.borderColor = 'var(--line-2)'; e.target.style.boxShadow = 'none'; }} />
+              </PanelCard>
+
+              {window.DealTodos && onAddTodo && (
+                <PanelCard title="Tasks" hint="tasks linked to this deal">
+                  <window.DealTodos
+                    deal={deal}
+                    todos={todos || []}
+                    onAdd={onAddTodo}
+                    onPatch={onPatchTodo}
+                    onDelete={onDeleteTodo}
+                    onViewAll={onViewTasks}
+                  />
+                </PanelCard>
+              )}
+
+              <PanelCard title="Notes" hint="UW thoughts, broker feedback, pricing guidance">
+                <NotesEditor value={deal.notes} onChange={(v) => set('notes', v)} />
+              </PanelCard>
+
+              {window.DocumentVault && <window.DocumentVault deal={deal} set={set} />}
+            </div>
+
+            {/* right rail */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {window.ICMemoButton &&
+                <window.ICMemoButton deal={deal} onRunMemo={onRunMemo} />
+              }
+              <RailCard icon="target" title="Key Metrics">
+                <RailRow label="Ask Price" value={deal.askPrice ? fmtShort(deal.askPrice) : '—'} muted={!deal.askPrice} />
+                <RailRow label="UW Price" value={deal.purchasePrice ? fmtShort(deal.purchasePrice) : '—'} muted={!deal.purchasePrice} />
+                <RailRow label="Total Basis" value={fmtShort(m.totalBasis)} muted={!m.totalBasis} />
+              </RailCard>
+
+              <RailCard icon="clock" title="Timeline">
+                <RailRow label="Date Entered" value={fmtDate(deal.dateEntered)} num={false} />
+                <RailRow label="Days in Pipeline" value={(days != null ? days : 0) + ' days'} />
+                <RailRow label="LOI Submitted" value={deal.dateLOISubmitted ? fmtDate(deal.dateLOISubmitted) : 'Not yet'} num={false} muted={!deal.dateLOISubmitted} />
+                <RailRow label="Under Contract" value={deal.dateUnderContract ? fmtDate(deal.dateUnderContract) : 'Not yet'} num={false} muted={!deal.dateUnderContract} />
+              </RailCard>
+
+              <RailCard icon="flag" title="Origination">
+                <RailRow label="Broker Firm" value={deal.broker || '—'} num={false} />
+                <RailRow label="Market" value={deal.market || '—'} num={false} />
+              </RailCard>
+            </div>
+          </div>
+        }
+
+        {/* ===== QUICK UNDERWRITING ===== */}
+        {tab === 'quickuw' && window.QuickUnderwritingTab && <window.QuickUnderwritingTab deal={deal} set={set} />}
+
+        {/* ===== FULL UNDERWRITING ===== */}
+        {tab === 'fulluw' && window.FullUnderwritingTab && <window.FullUnderwritingTab deal={deal} set={set} />}
+
+        {/* ===== RETURN METRICS ===== */}
+        {tab === 'returns' && window.ReturnsTab && <window.ReturnsTab deal={deal} set={set} />}
+
+        {/* ===== PROPERTY / SUBMARKET REVIEW ===== */}
+        {tab === 'market' && window.MarketReviewTab &&
+        <window.MarketReviewTab deal={deal} onRun={onRunMarketReview} />
+        }
+
+        {/* ===== LOCATION ===== */}
+        {tab === 'location' &&
+        <LocationView deal={deal} set={set} />
+        }
+
+        {/* ===== NOTES ===== */}
+        {tab === 'notes' &&
+        <PanelCard title="Notes" hint="UW thoughts, broker feedback, pricing guidance">
+            <NotesEditor value={deal.notes} onChange={(v) => set('notes', v)} minHeight={360} />
+          </PanelCard>
+        }
+
+      </div>
+    </div>);
+
+}
+
+Object.assign(window, {
+  DealDetail, FieldInput, SectionHead, CalcRow, PerUnit, OverviewItem,
+  BannerShell, FoundRow, MissingRow, PanelCard
+});
