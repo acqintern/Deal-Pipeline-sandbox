@@ -49,13 +49,32 @@
     return (data || []).map((r) => ({ ...(r.data || {}), id: r.id }));
   }
   async function saveDeals(deals) {
-    if (!client) return;
-    const rows = deals.map((d, i) => ({ id: String(d.id), data: d, position: i, updated_at: new Date().toISOString() }));
-    const { error: upErr } = await client.from('deals').upsert(rows, { onConflict: 'id' });
+   let lastSavedSnapshot = {}; // remembers what we last sent, per deal
+
+async function saveDeals(deals) {
+  if (!client) return;
+  const changedRows = [];
+  const currentIds = new Set();
+
+  deals.forEach((d, i) => {
+    const id = String(d.id);
+    currentIds.add(id);
+    const snapshot = JSON.stringify({ data: d, position: i });
+    if (lastSavedSnapshot[id] !== snapshot) {
+      changedRows.push({ id, data: d, position: i, updated_at: new Date().toISOString() });
+      lastSavedSnapshot[id] = snapshot;
+    }
+  });
+
+  if (changedRows.length) {
+    const { error: upErr } = await client.from('deals').upsert(changedRows, { onConflict: 'id' });
     if (upErr) throw upErr;
-    // NOTE: No auto-delete here. Deletion from cloud is done explicitly via
-    // deleteCloudDeals(ids) so that a race condition or stale state can never
-    // silently wipe deals that the user hasn't intentionally removed.
+  }
+
+  Object.keys(lastSavedSnapshot).forEach((id) => {
+    if (!currentIds.has(id)) delete lastSavedSnapshot[id];
+  });
+}
   }
 
   // Explicitly remove specific deal IDs from cloud. Called only when the user
