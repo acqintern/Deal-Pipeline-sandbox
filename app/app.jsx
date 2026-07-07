@@ -2270,21 +2270,12 @@ function AltusApp() {
     cloud.loadDeals().then((rows) => {
       if (!active || !rows) return;
       cloudLoaded.current = true;
-      if (rows.length) {
-        const hasLocalSave = !!localStorage.getItem(LS_KEY);
-        if (hasLocalSave) {
-          // Merge: local wins for every ID it knows about (localStorage is written
-          // synchronously on every change, so it is always >= cloud freshness).
-          // Cloud contributes only deals that don't exist locally yet (other device / session).
-          const localById = Object.fromEntries(deals.map(d => [String(d.id), d]));
-          const merged = [...deals, ...rows.filter(r => !localById[String(r.id)])];
-          setDeals(migrateDeals(merged));
-          // Push merged state back so cloud catches up to anything that wasn't synced yet.
-          cloud.saveDeals(merged).catch(e => console.warn('[cloud] merge-sync failed', e));
-        } else {
-          // Fresh browser with no localStorage — trust cloud data entirely.
-          setDeals(migrateDeals(rows));
-        }
+     if (rows.length) {
+        // Cloud is the single source of truth. On every load, replace local state with
+        // the cloud copy so all logged-in users see identical data after a refresh.
+        // localStorage is still rewritten from this (by the persist effect) and serves
+        // only as an offline cache — it never overrides or overwrites the cloud again.
+        setDeals(migrateDeals(rows));
       } else {
         // Empty cloud — seed it from current local data.
         cloud.saveDeals(deals).catch((e) => console.warn('[cloud] seed failed', e));
