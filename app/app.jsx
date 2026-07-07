@@ -2378,6 +2378,61 @@ function AltusApp() {
     };
   }, []);
 
+  // Live cloud sync: reflect other clients' changes in realtime via Supabase Postgres changes.
+  useE(() => {
+    if (!cloud.enabled) return undefined;
+    if (cloud.requireLogin && !session) return undefined;
+    return cloud.subscribeTable('deals', (payload) => {
+      if (payload.eventType === 'DELETE') {
+        const id = payload.old.id;
+        setDeals((ds) => ds.filter((d) => d.id !== id));
+        return;
+      }
+      const incoming = migrateDeals([{ ...(payload.new.data || {}), id: payload.new.id }])[0];
+      setDeals((ds) => {
+        const existing = ds.find((d) => d.id === incoming.id);
+        if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ds;
+        return existing ? ds.map((d) => d.id === incoming.id ? incoming : d) : [...ds, incoming];
+      });
+    });
+  }, [session]);
+
+  useE(() => {
+    if (!cloud.enabled) return undefined;
+    if (cloud.requireLogin && !session) return undefined;
+    return cloud.subscribeTable('contacts', (payload) => {
+      if (payload.eventType === 'DELETE') {
+        const id = payload.old.id;
+        setContacts((cs) => cs.filter((c) => c.id !== id));
+        return;
+      }
+      const incoming = { ...(payload.new.data || {}), id: payload.new.id };
+      setContacts((cs) => {
+        const existing = cs.find((c) => c.id === incoming.id);
+        if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return cs;
+        return existing ? cs.map((c) => c.id === incoming.id ? incoming : c) : [...cs, incoming];
+      });
+    });
+  }, [session]);
+
+  useE(() => {
+    if (!cloud.enabled) return undefined;
+    if (cloud.requireLogin && !session) return undefined;
+    return cloud.subscribeTable('todos', (payload) => {
+      if (payload.eventType === 'DELETE') {
+        const id = payload.old.id;
+        setTodos((ts) => ts.filter((t) => t.id !== id));
+        return;
+      }
+      const incoming = { ...(payload.new.data || {}), id: payload.new.id };
+      setTodos((ts) => {
+        const existing = ts.find((t) => t.id === incoming.id);
+        if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ts;
+        return existing ? ts.map((t) => t.id === incoming.id ? incoming : t) : [...ts, incoming];
+      });
+    });
+  }, [session]);
+
   // Scroll <main> to top when a deal opens so DealDetail is always fully visible;
   // restore previous position when the user goes back.
   useE(() => {
