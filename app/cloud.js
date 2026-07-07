@@ -161,6 +161,18 @@
     if (error) console.warn('[AltusCloud] doc delete failed:', error);
   }
 
-  window.AltusCloud = { enabled, requireLogin, client, getSession, signIn, signOut, onAuthChange, currentEmail, loadDeals, saveDeals, deleteCloudDeals, loadContacts, saveContacts, loadTodos, saveTodos, uploadDoc, signedDocUrl, deleteDoc };
+  // ---- Realtime ----
+  // Subscribes to Postgres changes on `table` and invokes `handler(payload)` for
+  // every INSERT/UPDATE/DELETE. Returns an unsubscribe function.
+  function subscribeTable(table, handler) {
+    if (!client) return () => {};
+    const channel = client
+      .channel('public:' + table)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => handler(payload))
+      .subscribe();
+    return () => { client.removeChannel(channel); };
+  }
+
+  window.AltusCloud = { enabled, requireLogin, client, getSession, signIn, signOut, onAuthChange, currentEmail, loadDeals, saveDeals, deleteCloudDeals, loadContacts, saveContacts, loadTodos, saveTodos, uploadDoc, signedDocUrl, deleteDoc, subscribeTable };
   if (enabled) console.info('[AltusCloud] connected to', cfg.SUPABASE_URL);
 })();
