@@ -2208,6 +2208,7 @@ function SaveIndicator({ state }) {
     saving: { dot: '#d9a441', text: 'Saving…' },
     saved:  { dot: '#4caf7e', text: 'Saved' },
     error:  { dot: '#e0686b', text: 'Save failed' },
+    conflict: { dot: '#e0686b', text: 'Sync paused — data mismatch, contact an admin' },
   }[state] || { dot: '#5a7a96', text: '' };
   if (!cfg.text) return null;
   return (
@@ -2233,7 +2234,13 @@ function AltusApp() {
   const clearOM  = (id) => setOMMap( (m) => { const n = {...m}; delete n[id]; return n; });
   const addTodo    = (t)  => setTodos((ts) => [t, ...ts]);
   const patchTodo  = (id, fields) => setTodos((ts) => ts.map((t) => t.id === id ? { ...t, ...fields } : t));
-  const deleteTodo = (id) => setTodos((ts) => ts.filter((t) => t.id !== id));
+  const deleteTodo = (id) => {
+    setTodos((ts) => ts.filter((t) => t.id !== id));
+    // Explicitly delete from cloud — never rely on auto-save pruning for this.
+    if (cloud.enabled && cloud.deleteCloudTodos) {
+      cloud.deleteCloudTodos([id]).catch((e) => console.warn('[cloud] explicit todo delete failed', e));
+    }
+  };
   const clearT12 = (id) => setT12Map((m) => { const n = {...m}; delete n[id]; return n; });
   const clearRR  = (id) => setRRMap( (m) => { const n = {...m}; delete n[id]; return n; });
   const [contacts, setContacts] = useS(loadContacts);
@@ -2261,39 +2268,47 @@ function AltusApp() {
     return () => { active = false; if (off) off(); };
   }, []);
 
-  // Load deals from cloud once authenticated (or immediately if no login required but enabled)
+  // Load deals from cloud once authenticated (or immediately if no login required but enabled).
+  // Uses a safe 3-way merge (see cloud.reconcileDeals) instead of blindly trusting whatever
+  // the read returns — a bare "cloud always wins" replace is what silently wiped the
+  // pipeline on 2026-07-08 when a load returned bad/partial data. If the merge decides the
+  // read looks untrustworthy (suspicious), it leaves local data completely untouched and
+  // surfaces a visible warning instead of guessing.
   useE(() => {
     if (!cloud.enabled) return;
     if (cloud.requireLogin && !session) return;
     if (cloudLoaded.current) return; // already loaded — skip token-refresh re-fires that would wipe local edits
     let active = true;
-    cloud.loadDeals().then((rows) => {
-      if (!active || !rows) return;
-      cloudLoaded.current = true;
-     if (rows.length) {
-        // Cloud is the single source of truth. On every load, replace local state with
-        // the cloud copy so all logged-in users see identical data after a refresh.
-        // localStorage is still rewritten from this (by the persist effect) and serves
-        // only as an offline cache — it never overrides or overwrites the cloud again.
-        setDeals(migrateDeals(rows));
-      } else {
-        // Empty cloud — seed it from current local data.
-        cloud.saveDeals(deals).catch((e) => console.warn('[cloud] seed failed', e));
+    cloud.reconcileDeals(deals).then((result) => {
+      if (!active) return;
+      if (result.suspicious) {
+        console.error('[cloud] refusing to sync deals: the cloud read looks like it lost ' +
+          result.dropped + ' of ' + result.total + ' previously-synced deals. Leaving local data untouched.');
+        setSaveState('conflict');
+        return; // don't mark cloudLoaded — a later auth/session event gets another chance
       }
+      cloudLoaded.current = true;
+      if (result.changed) setDeals(migrateDeals(result.items));
     }).catch((e) => console.warn('[cloud] load failed, using local data', e));
     return () => { active = false; };
   }, [session]);
 
-  // Load contacts from cloud once authenticated
+  // Load contacts from cloud once authenticated (same safe-merge approach as deals).
   useE(() => {
     if (!cloud.enabled) return;
     if (cloud.requireLogin && !session) return;
     if (contactsLoaded.current) return; // already loaded
     let active = true;
-    cloud.loadContacts().then((rows) => {
-      if (!active || !rows) return;
-      if (rows.length) { contactsLoaded.current = true; setContacts(rows); }
-      else { if (contacts.length) cloud.saveContacts(contacts).catch((e) => console.warn('[cloud] contacts seed failed', e)); contactsLoaded.current = true; }
+    cloud.reconcileContacts(contacts).then((result) => {
+      if (!active) return;
+      if (result.suspicious) {
+        console.error('[cloud] refusing to sync contacts: the cloud read looks like it lost ' +
+          result.dropped + ' of ' + result.total + ' previously-synced contacts. Leaving local data untouched.');
+        setSaveState('conflict');
+        return;
+      }
+      contactsLoaded.current = true;
+      if (result.changed) setContacts(result.items);
     }).catch((e) => console.warn('[cloud] contacts load failed, using local', e));
     return () => { active = false; };
   }, [session]);
@@ -2301,16 +2316,22 @@ function AltusApp() {
   const addContact = (c) => setContacts((cs) => cs.find((x) => x.id === c.id) ? cs : [...cs, c]);
   const patchContact = (id, changes) => setContacts((cs) => cs.map((c) => c.id === id ? { ...c, ...changes } : c));
 
-  // Load todos from cloud once authenticated (mirrors contacts)
+  // Load todos from cloud once authenticated (mirrors contacts/deals).
   useE(() => {
     if (!cloud.enabled) return;
     if (cloud.requireLogin && !session) return;
     if (todosLoaded.current) return;
     let active = true;
-    cloud.loadTodos().then((rows) => {
-      if (!active || !rows) return;
-      if (rows.length) { todosLoaded.current = true; setTodos(rows); }
-      else { if (todos.length) cloud.saveTodos(todos).catch((e) => console.warn('[cloud] todos seed failed', e)); todosLoaded.current = true; }
+    cloud.reconcileTodos(todos).then((result) => {
+      if (!active) return;
+      if (result.suspicious) {
+        console.error('[cloud] refusing to sync todos: the cloud read looks like it lost ' +
+          result.dropped + ' of ' + result.total + ' previously-synced todos. Leaving local data untouched.');
+        setSaveState('conflict');
+        return;
+      }
+      todosLoaded.current = true;
+      if (result.changed) setTodos(result.items);
     }).catch((e) => console.warn('[cloud] todos load failed, using local', e));
     return () => { active = false; };
   }, [session]);
@@ -2991,7 +3012,13 @@ ${text}`;
           setDeals(migrateDeals(window.ALTUS_DEALS.map((d) => ({ ...d }))));
           setOMMap({}); setT12Map({}); setRRMap({});
         }} />
-        <TweakButton label="Clear CRM contacts" onClick={() => {localStorage.removeItem(LS_CONTACTS);setContacts([]);}} />
+        <TweakButton label="Clear CRM contacts" onClick={() => {
+          localStorage.removeItem(LS_CONTACTS);
+          if (cloud.enabled && cloud.deleteCloudContacts) {
+            cloud.deleteCloudContacts(contacts.map((c) => String(c.id))).catch(() => {});
+          }
+          setContacts([]);
+        }} />
         <TweakButton label="Restore deals from backup" onClick={() => {
           try {
             const raw = localStorage.getItem(LS_KEY + '_backup');
