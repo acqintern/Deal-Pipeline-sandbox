@@ -25,6 +25,7 @@ function loadDeals() {
     const saved = JSON.parse(localStorage.getItem(LS_KEY));
     if (saved && Array.isArray(saved) && saved.length) return saved;
   } catch (e) {}
+  if (window.AltusCloud && window.AltusCloud.enabled) return []; // Supabase is authoritative — never seed from the bundled snapshot
   return window.ALTUS_DEALS.map((d) => ({ ...d }));
 }
 
