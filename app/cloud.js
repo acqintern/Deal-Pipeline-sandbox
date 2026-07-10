@@ -62,88 +62,44 @@
     persistSnapshots();
   }
 
-  // Generic 3-way merge: never lets a cloud read silently delete or clobber local data
-  // it can't account for. `fp` fingerprints an item the same way on both sides so they're
-  // comparable; `fromRow` turns a raw cloud row into the app's item shape.
-  function reconcileTable(table, localItems, rows, { keyOf, fp, fromRow }) {
+  // Cloud is the single, unconditional source of truth on every load: local state is
+  // always fully replaced with whatever cloud says, no exceptions, no "keep local
+  // because it looks unsynced." Saves are already reliable and immediate, so trying to
+  // preserve a local guess is what kept causing stale data to win in edge cases (array
+  // position drift, unbaselined rows, bundled sample data, sign-out/sign-in) — every one
+  // of those was a different symptom of the same root cause: local ever having a vote.
+  // The only thing this keeps is a circuit breaker that refuses to act on a read that
+  // looks broken (e.g. empty) rather than blindly trusting it — without that, this is
+  // exactly the 2026-07-08 failure mode. `fp` fingerprints an item so the breaker can
+  // tell "genuinely deleted" apart from "read looks broken"; `fromRow` turns a raw cloud
+  // row into the app's item shape.
+  function reconcileTable(table, localItems, rows, { fp, fromRow }) {
     const base = synced(table);
-    const localById = new Map(localItems.map((item, i) => [keyOf(item), { item, i }]));
     const cloudById = new Map(rows.map((row) => [String(row.id), row]));
 
     // Circuit breaker: if this browser has previously confirmed rows existed and the
     // cloud now looks like it lost most/all of them, refuse to touch anything rather
-    // than "helpfully" mass-deleting (or mass-resurrecting) on a bad read. A real,
-    // intentional bulk delete goes through deleteCloudXxx, which forgets the affected
-    // ids immediately — so it never trips this breaker.
+    // than blindly applying a bad/partial read. A real, intentional bulk delete goes
+    // through deleteCloudXxx, which forgets the affected ids immediately — so it never
+    // trips this breaker.
     const knownIds = Object.keys(base);
     if (knownIds.length) {
-      const wouldDrop = knownIds.filter((id) => {
-        if (cloudById.has(id)) return false;
-        const entry = localById.get(id);
-        return entry && fp(entry.item, entry.i) === base[id]; // unchanged locally, missing from cloud
-      });
-      const dropFraction = wouldDrop.length / knownIds.length;
-      if (wouldDrop.length >= 5 && dropFraction >= 0.25) {
-        return { items: localItems, changed: false, suspicious: true, dropped: wouldDrop.length, total: knownIds.length };
+      const missingCount = knownIds.filter((id) => !cloudById.has(id)).length;
+      const missingFraction = missingCount / knownIds.length;
+      if (missingCount >= 5 && missingFraction >= 0.25) {
+        return { items: localItems, changed: false, suspicious: true, dropped: missingCount, total: knownIds.length };
       }
     }
 
-    const result = [];
+    const result = rows.map((row) => fromRow(row));
     const toCommit = {};
-    const toForget = [];
-    let changed = false;
-
-    localItems.forEach((item, i) => {
-      const id = keyOf(item);
-      const row = cloudById.get(id);
-      const oursFp = fp(item, i);
-      if (!row) {
-        // Missing from cloud. If we hadn't changed it since we last agreed with cloud,
-        // trust that it was deleted elsewhere and drop it too; otherwise it's either a
-        // brand-new item that's never synced, or an unsynced local edit — keep it and
-        // mark changed so the caller applies this result and the normal debounced save
-        // effect pushes it.
-        if (base[id] !== undefined && base[id] === oursFp) { toForget.push(id); }
-        else result.push(item);
-        changed = true;
-        return;
-      }
-      const theirsFp = fp(fromRow(row), row.position);
-      if (oursFp === theirsFp) {
-        // Already in agreement. Still record the fingerprint as the known-good base if
-        // we didn't have one yet — otherwise a browser that starts out already in sync
-        // (e.g. cache was cleared but re-populated identically) would have an empty
-        // synced snapshot and the circuit breaker below would have nothing to protect.
-        if (base[id] === undefined) toCommit[id] = theirsFp;
-        result.push(item);
-        return;
-      }
-      if (base[id] === oursFp || base[id] === undefined) {
-        // Unchanged locally since last sync — OR no baseline recorded yet for this
-        // browser/deal. Either way, trust cloud rather than risk a stale local cache
-        // silently overwriting a real update made elsewhere.
-        result.push(fromRow(row));
-        toCommit[id] = theirsFp;
-        changed = true;
-      } else {
-        // Genuinely changed locally since we last agreed with cloud — keep our copy.
-        result.push(item);
-        changed = true;
-      }
-    });
-
-    // Rows that exist only in cloud (added from elsewhere) get appended.
-    rows.forEach((row) => {
-      const id = String(row.id);
-      if (!localById.has(id)) {
-        result.push(fromRow(row));
-        toCommit[id] = fp(fromRow(row), row.position);
-        changed = true;
-      }
-    });
+    rows.forEach((row) => { toCommit[String(row.id)] = fp(fromRow(row), row.position); });
+    const toForget = knownIds.filter((id) => !cloudById.has(id));
 
     if (Object.keys(toCommit).length) commitSynced(table, toCommit);
     if (toForget.length) forgetSynced(table, toForget);
+
+    const changed = JSON.stringify(result) !== JSON.stringify(localItems);
     return { items: result, changed, suspicious: false };
   }
 
@@ -182,14 +138,13 @@
     if (stale.length) forgetSynced('deals', stale); // bookkeeping only — never deletes cloud rows
   }
 
-  // Fetches cloud deals and safely merges them into `localDeals` (see reconcileTable).
+  // Fetches cloud deals and replaces localDeals with them (see reconcileTable).
   // Returns { items, changed, suspicious }. On `suspicious`, localDeals is returned
   // untouched — the caller should surface a warning instead of applying anything.
   async function reconcileDeals(localDeals) {
     const rows = await loadDeals();
     if (rows === null) return { items: localDeals, changed: false, suspicious: false };
     return reconcileTable('deals', localDeals, rows, {
-      keyOf: (d) => String(d.id),
       fp: dealFp,
       fromRow: (row) => ({ ...(row.data || {}), id: row.id }),
     });
@@ -242,7 +197,6 @@
     const rows = await loadContacts();
     if (rows === null) return { items: localContacts, changed: false, suspicious: false };
     return reconcileTable('contacts', localContacts, rows, {
-      keyOf: (c) => String(c.id),
       fp: itemFp,
       fromRow: (row) => ({ ...(row.data || {}), id: row.id }),
     });
@@ -291,7 +245,6 @@
     const rows = await loadTodos();
     if (rows === null) return { items: localTodos, changed: false, suspicious: false };
     return reconcileTable('todos', localTodos, rows, {
-      keyOf: (t) => String(t.id),
       fp: itemFp,
       fromRow: (row) => ({ ...(row.data || {}), id: row.id }),
     });

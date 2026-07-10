@@ -2285,11 +2285,12 @@ function AltusApp() {
   }, [session]);
 
   // Load deals from cloud once authenticated (or immediately if no login required but enabled).
-  // Uses a safe 3-way merge (see cloud.reconcileDeals) instead of blindly trusting whatever
-  // the read returns — a bare "cloud always wins" replace is what silently wiped the
-  // pipeline on 2026-07-08 when a load returned bad/partial data. If the merge decides the
-  // read looks untrustworthy (suspicious), it leaves local data completely untouched and
-  // surfaces a visible warning instead of guessing.
+  // Cloud is unconditionally authoritative here (see cloud.reconcileDeals) — local state
+  // is always fully replaced with whatever cloud says, no local-wins exceptions. The one
+  // safety net is a circuit breaker: if a read looks like it lost a large share of
+  // previously-known rows (the exact failure mode that wiped the pipeline on
+  // 2026-07-08), it's flagged as suspicious and left untouched with a visible warning
+  // instead of being blindly applied.
   useE(() => {
     if (!cloud.enabled) return;
     if (cloud.requireLogin && !session) return;
