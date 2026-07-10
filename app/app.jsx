@@ -2269,6 +2269,21 @@ function AltusApp() {
     return () => { active = false; if (off) off(); };
   }, []);
 
+  // Reset the one-time "already loaded" guards whenever the session drops (sign-out).
+  // Without this, signing out and back in — without a hard page refresh — left these
+  // flags set from the previous session, so the load effects below skipped their fetch
+  // entirely and just kept whatever was in memory from before logout. That stale
+  // in-memory copy is what was overriding Supabase after a logout/login cycle; this
+  // ensures a fresh sign-in always re-runs the same safe reconcile-from-cloud a page
+  // refresh does.
+  useE(() => {
+    if (!session) {
+      cloudLoaded.current = false;
+      contactsLoaded.current = false;
+      todosLoaded.current = false;
+    }
+  }, [session]);
+
   // Load deals from cloud once authenticated (or immediately if no login required but enabled).
   // Uses a safe 3-way merge (see cloud.reconcileDeals) instead of blindly trusting whatever
   // the read returns — a bare "cloud always wins" replace is what silently wiped the
