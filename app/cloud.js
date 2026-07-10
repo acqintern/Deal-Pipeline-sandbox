@@ -118,15 +118,15 @@
         result.push(item);
         return;
       }
-      if (base[id] === oursFp) {
-        // Unchanged locally since last sync — cloud has a newer version, take it.
+      if (base[id] === oursFp || base[id] === undefined) {
+        // Unchanged locally since last sync — OR no baseline recorded yet for this
+        // browser/deal. Either way, trust cloud rather than risk a stale local cache
+        // silently overwriting a real update made elsewhere.
         result.push(fromRow(row));
         toCommit[id] = theirsFp;
         changed = true;
       } else {
-        // Changed locally (or a genuine conflict) — keep our copy. Still counts as
-        // "changed" so the caller applies this result and the normal debounced save
-        // effect fires and re-pushes it (it no longer matches the committed snapshot).
+        // Genuinely changed locally since we last agreed with cloud — keep our copy.
         result.push(item);
         changed = true;
       }
