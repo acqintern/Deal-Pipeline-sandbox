@@ -2371,17 +2371,13 @@ function AltusApp() {
   }, [contacts]);
 
   // Persist deals: localStorage immediately + debounced cloud save with status tracking.
+  // localStorage here is purely a fast-load cache, not a source of truth that could ever
+  // be "restored" over Supabase — there is deliberately no UI path that lets local data
+  // override cloud (see cloud.reconcileDeals; the previous "restore from backup" buttons
+  // were removed for exactly this reason).
   useE(() => {
     dealsRef.current = deals;
     try { localStorage.setItem(LS_KEY, JSON.stringify(deals)); } catch (e) {}
-    // Rolling backup — kept in a separate key so a corrupted primary save
-    // doesn't also wipe the recovery copy. Written only when deal count is
-    // plausible (guards against accidentally backing up an empty array).
-    try {
-      if (deals.length > 0) {
-        localStorage.setItem(LS_KEY + '_backup', JSON.stringify({ ts: Date.now(), deals }));
-      }
-    } catch (e) {}
 
     if (cloud.enabled && (!cloud.requireLogin || session) && cloudLoaded.current) {
       setSaveState('dirty');
@@ -2899,36 +2895,6 @@ ${text}`;
                 <div style={{ fontSize: 11, color: '#607080', marginBottom: 3 }}>Active deals in pipeline</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: '#0d1f35' }}>{deals.length}</div>
               </div>
-              {(() => {
-                try {
-                  const raw = localStorage.getItem(LS_KEY + '_backup');
-                  if (!raw) return <div style={{ fontSize: 11, color: '#8fa0b2', fontStyle: 'italic' }}>No backup saved yet.</div>;
-                  const { ts, deals: bd } = JSON.parse(raw);
-                  const age = Math.round((Date.now() - ts) / 60000);
-                  const ageStr = age < 60 ? age + ' min ago' : Math.round(age/60) + ' hr ago';
-                  return (
-                    <div style={{ background: '#edf7ed', border: '1px solid #b6dfb6', borderRadius: 7,
-                      padding: '10px 13px', marginBottom: 8 }}>
-                      <div style={{ fontSize: 11, color: '#096b38', fontWeight: 600, marginBottom: 2 }}>✓ Backup available</div>
-                      <div style={{ fontSize: 11, color: '#607080' }}>{bd.length} deals · saved {ageStr}</div>
-                    </div>
-                  );
-                } catch(e) { return null; }
-              })()}
-              <button onClick={() => {
-                try {
-                  const raw = localStorage.getItem(LS_KEY + '_backup');
-                  if (!raw) { alert('No backup found.'); return; }
-                  const { ts, deals: backed } = JSON.parse(raw);
-                  if (!Array.isArray(backed) || !backed.length) { alert('Backup is empty.'); return; }
-                  const age = Math.round((Date.now() - ts) / 60000);
-                  if (!window.confirm(`Restore ${backed.length} deal(s) from backup saved ${age} minute(s) ago? Your current ${deals.length} deal(s) will be replaced.`)) return;
-                  setDeals(migrateDeals(backed));
-                  setShowSettings(false);
-                } catch(e) { alert('Could not read backup: ' + e.message); }
-              }} style={{ width: '100%', padding: '9px 0', borderRadius: 7, border: '1.5px solid #1f57c4',
-                background: '#fff', color: '#1f57c4', fontWeight: 600, fontSize: 13,
-                cursor: 'pointer', marginBottom: 6 }}>Restore from Backup</button>
             </div>
 
             {/* Appearance */}
@@ -2947,24 +2913,10 @@ ${text}`;
               <div style={{ fontSize: 11, color: '#8fa0b2', marginBottom: 8 }}>Accent color</div>
             </div>
 
-            {/* Danger Zone */}
+            {/* Account */}
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase',
-                color: '#c12828', marginBottom: 10 }}>Danger Zone</div>
-              <button onClick={() => {
-                if (!window.confirm('⚠️ This will permanently delete ALL your deals and restore the original sample data. This cannot be undone. Are you sure?')) return;
-                localStorage.removeItem(LS_KEY);
-                if (cloud.enabled && cloud.deleteCloudDeals) {
-                  cloud.loadDeals().then(rows => {
-                    if (rows && rows.length) cloud.deleteCloudDeals(rows.map(r => String(r.id))).catch(() => {});
-                  }).catch(() => {});
-                }
-                setDeals(migrateDeals(window.ALTUS_DEALS.map((d) => ({ ...d }))));
-                setOMMap({}); setT12Map({}); setRRMap({});
-                setShowSettings(false);
-              }} style={{ width: '100%', padding: '9px 0', borderRadius: 7, border: '1.5px solid #c12828',
-                background: '#fff', color: '#c12828', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-                marginBottom: 6 }}>Reset to Sample Data</button>
+                color: '#8fa0b2', marginBottom: 10 }}>Account</div>
               {cloud.enabled && session && (
                 <button onClick={async () => { await cloud.signOut(); setSession(null); setShowSettings(false); }}
                   style={{ width: '100%', padding: '9px 0', borderRadius: 7, border: '1.5px solid #dde3ec',
@@ -3013,40 +2965,12 @@ ${text}`;
         <TweakSection label="Appearance" />
         <TweakColor label="Accent" value={t.accent} options={['#2f6df0', '#0c7a43', '#7c5cff', '#b87214']} onChange={(v) => setTweak('accent', v)} />
         <TweakRadio label="Density" value={t.density} options={['compact', 'regular', 'comfy']} onChange={(v) => setTweak('density', v)} />
-        <TweakSection label="Data" />
         {cloud.enabled && session && (
-          <TweakButton label={'Sign out (' + (cloud.currentEmail(session) || 'account') + ')'} onClick={async () => { await cloud.signOut(); setSession(null); }} />
+          <>
+            <TweakSection label="Account" />
+            <TweakButton label={'Sign out (' + (cloud.currentEmail(session) || 'account') + ')'} onClick={async () => { await cloud.signOut(); setSession(null); }} />
+          </>
         )}
-        <TweakButton label="Reset seed data" onClick={() => {
-          if (!window.confirm('⚠️ This will permanently delete ALL your deals and restore the original sample data. This cannot be undone. Are you sure?')) return;
-          localStorage.removeItem(LS_KEY);
-          if (cloud.enabled && cloud.deleteCloudDeals) {
-            // Clear all cloud deals by fetching current IDs first
-            cloud.loadDeals().then(rows => {
-              if (rows && rows.length) cloud.deleteCloudDeals(rows.map(r => String(r.id))).catch(() => {});
-            }).catch(() => {});
-          }
-          setDeals(migrateDeals(window.ALTUS_DEALS.map((d) => ({ ...d }))));
-          setOMMap({}); setT12Map({}); setRRMap({});
-        }} />
-        <TweakButton label="Clear CRM contacts" onClick={() => {
-          localStorage.removeItem(LS_CONTACTS);
-          if (cloud.enabled && cloud.deleteCloudContacts) {
-            cloud.deleteCloudContacts(contacts.map((c) => String(c.id))).catch(() => {});
-          }
-          setContacts([]);
-        }} />
-        <TweakButton label="Restore deals from backup" onClick={() => {
-          try {
-            const raw = localStorage.getItem(LS_KEY + '_backup');
-            if (!raw) { alert('No backup found.'); return; }
-            const { ts, deals: backed } = JSON.parse(raw);
-            if (!Array.isArray(backed) || !backed.length) { alert('Backup is empty.'); return; }
-            const age = Math.round((Date.now() - ts) / 60000);
-            if (!window.confirm(`Restore ${backed.length} deal(s) from backup saved ${age} minute(s) ago? Your current deals will be replaced.`)) return;
-            setDeals(migrateDeals(backed));
-          } catch (e) { alert('Could not read backup: ' + e.message); }
-        }} />
       </TweaksPanel>
     </div>);
 
