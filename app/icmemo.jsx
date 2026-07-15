@@ -118,7 +118,8 @@ function CapDonut({ uw, basis }) {
           </div>
         ))}
         {uw.acqLoan && (
-          [['LTV', ltv!=null?_p(ltv):'—'],
+          [['Financing', uw.acqLabel||'—'],
+           ['LTV', ltv!=null?_p(ltv):'—'],
            ['Interest Rate', (uw.acqLoan.rate*100).toFixed(2)+'%'],
            ['Amortization', Math.round(uw.acqLoan.amMonths/12)+' Yrs'],
            ['DSCR (Stab.)', dscr!=null?(_n(dscr)+'x'):'—']
@@ -132,6 +133,24 @@ function CapDonut({ uw, basis }) {
                 fontVariantNumeric:'tabular-nums' }}>{v}</span>
             </div>
           ))
+        )}
+        {uw.refiOn && uw.refiLoan && (
+          <div style={{ marginTop:4, paddingTop:4, borderTop:'1px dashed '+IC.line }}>
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.07em', textTransform:'uppercase',
+              color:IC.blue, marginBottom:2 }}>Refinance — Year {uw.refiYear}</div>
+            {[['Refi Proceeds', _ms(uw.refiProceeds)],
+              ['Refi Rate', (uw.refiLoan.rate*100).toFixed(2)+'%'],
+              ['Cash-Out to Equity', _ms(uw.refiCashOut)]].map(([l,v]) => (
+              <div key={l} style={{ display:'flex', alignItems:'center', gap:6,
+                padding:'2px 0', borderBottom:'1px solid '+IC.line2 }}>
+                <div style={{ width:8, height:8, borderRadius:'50%', background:'transparent',
+                  border:'1.5px solid '+IC.line, flexShrink:0 }}/>
+                <span style={{ fontSize:10.5, color:IC.muted, flex:1 }}>{l}</span>
+                <span style={{ fontSize:11, fontWeight:600, color:IC.navy,
+                  fontVariantNumeric:'tabular-nums' }}>{v}</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -148,21 +167,24 @@ function ScenarioAnalysis({ deal, uw }) {
 
   const run = (ov) => { try { return window.computeScenario ? window.computeScenario(deal, ov) : null; } catch(e) { return null; } };
 
-  const gpr  = uw.gprGrowth||0.03;
-  const opex = uw.opexGrowth||0.025;
-  const exit = uw.exitCap||0.065;
+  // deal-level override fields are percent-scale numbers (e.g. 3 = 3%), while uw.* are decimals — convert before feeding back into computeScenario
+  const gprPct  = (uw.gprGrowth||0.03)*100;
+  const opexPct = (uw.opexGrowth||0.025)*100;
+  const exitPct = (uw.exitCap||0.065)*100;
+  const weakGpr = Math.max(0,gprPct-1), weakOpex = opexPct+1, weakExit = exitPct+0.5;
+  const bestGpr = gprPct+1, bestOpex = Math.max(0,opexPct-0.5), bestExit = Math.max(4,exitPct-0.25);
 
   const scenarios = [
     { label:'WEAK', color:IC.neg,
-      desc:`Rent ${_p(Math.max(0,gpr-.01))} · OpEx ${_p(opex+.01)} · Exit ${_r((exit+.005)*100)}`,
-      r: run({ gprGrowth:Math.max(0,gpr-.01), opexGrowth:opex+.01, exitCap:exit+.005 }) },
+      desc:`Rent ${weakGpr.toFixed(1)}% · OpEx ${weakOpex.toFixed(1)}% · Exit ${weakExit.toFixed(2)}%`,
+      r: run({ gprGrowth:weakGpr, opexGrowth:weakOpex, exitCap:weakExit }) },
     { label:'BASE', color:IC.navy,
       desc:'Current underwriting assumptions',
       r: { dealIRR:uw.irr, equityMultiple:uw.equityMultiple, avgDealYield:uw.avgYield,
            lpIRR:null, avgLpYield:null, lpMultiple:null, gpPromote:null } },
     { label:'BEST', color:IC.pos,
-      desc:`Rent ${_p(gpr+.01)} · OpEx ${_p(Math.max(0,opex-.005))} · Exit ${_r((Math.max(.04,exit-.0025))*100)}`,
-      r: run({ gprGrowth:gpr+.01, opexGrowth:Math.max(0,opex-.005), exitCap:Math.max(.04,exit-.0025) }) },
+      desc:`Rent ${bestGpr.toFixed(1)}% · OpEx ${bestOpex.toFixed(1)}% · Exit ${bestExit.toFixed(2)}%`,
+      r: run({ gprGrowth:bestGpr, opexGrowth:bestOpex, exitCap:bestExit }) },
   ];
 
   // Augment BASE with LP data
@@ -241,33 +263,40 @@ function ScenarioAnalysis({ deal, uw }) {
   );
 }
 
-// ─── Return decomposition ─────────────────────────────────────────────────────
+// ─── Return decomposition (pie) ────────────────────────────────────────────────
 function ReturnDecomp({ uw }) {
   if (!uw||!uw.totalDistributions) return null;
   const exit = uw.netSaleProceeds||0;
   const opCF = Math.max(0,(uw.totalDistributions||0)-exit);
   const total = opCF+exit; if (!total) return null;
-  const opP = Math.round(opCF/total*100);
-  const exP = 100-opP;
+  const opP = opCF/total, exP = 1-opP;
+  const r=34, stroke=11, cx=46, cy=46, size=92;
+  const circ = 2*Math.PI*r, opDash = opP*circ;
   return (
-    <div style={{ padding:'5px 11px 7px' }}>
-      <div style={{ height:26, borderRadius:3, overflow:'hidden', display:'flex', marginBottom:5 }}>
-        <div style={{ width:opP+'%', background:IC.navy, display:'flex', alignItems:'center',
-          justifyContent:'center', minWidth:24 }}>
-          <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{opP}%</span>
-        </div>
-        <div style={{ flex:1, background:IC.blue, display:'flex', alignItems:'center',
-          justifyContent:'center', minWidth:24 }}>
-          <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{exP}%</span>
-        </div>
+    <div style={{ display:'flex', gap:9, alignItems:'center', padding:'5px 11px 7px' }}>
+      <div style={{ flexShrink:0 }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke={IC.navy} strokeWidth={stroke}
+            strokeDasharray={`${opDash} ${circ}`} strokeDashoffset={0}
+            transform={`rotate(-90 ${cx} ${cy})`} />
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke={IC.blue} strokeWidth={stroke}
+            strokeDasharray={`${circ-opDash} ${circ}`} strokeDashoffset={-opDash}
+            transform={`rotate(-90 ${cx} ${cy})`} />
+          <text x={cx} y={cy-4} textAnchor="middle" fontSize="6.5" fontWeight="700"
+            fill={IC.faint} fontFamily={IC.sans} letterSpacing=".06em">TOTAL</text>
+          <text x={cx} y={cy+9} textAnchor="middle" fontSize="11.5" fontWeight="700"
+            fill={IC.navy} fontFamily={IC.sans}>{_ms(total)}</text>
+        </svg>
       </div>
-      <div style={{ display:'flex' }}>
-        {[['Operating Cash Flows', opCF, opP], ['Exit Proceeds', exit, exP]].map(([label,amt,pct]) => (
-          <div key={label} style={{ flex:pct }}>
-            <div style={{ fontSize:8.5, fontWeight:600, letterSpacing:'.08em', textTransform:'uppercase',
-              color:IC.muted, lineHeight:1.2 }}>{label}</div>
-            <div style={{ fontSize:13, fontWeight:700, color:IC.navy, marginTop:2,
-              fontVariantNumeric:'tabular-nums' }}>{_ms(amt)}</div>
+      <div style={{ flex:1 }}>
+        {[['Operating Cash Flows', opCF, opP, IC.navy], ['Exit Proceeds', exit, exP, IC.blue]].map(([label,amt,pct,col]) => (
+          <div key={label} style={{ display:'flex', alignItems:'center', gap:6,
+            padding:'2px 0', borderBottom:'1px solid '+IC.line2 }}>
+            <div style={{ width:8, height:8, borderRadius:'50%', background:col, flexShrink:0 }}/>
+            <span style={{ fontSize:10, color:IC.muted, flex:1 }}>{label}</span>
+            <span style={{ fontSize:11, fontWeight:600, color:IC.navy, fontVariantNumeric:'tabular-nums' }}>
+              {_ms(amt)}<span style={{ fontSize:9, color:IC.faint, marginLeft:3 }}>({_p(pct,0)})</span>
+            </span>
           </div>
         ))}
       </div>
@@ -312,17 +341,18 @@ function OperatingForecast({ uw }) {
   const years = [];
   for (let y=1; y<=maxY; y++) {
     const row=uw.rows[y]; if(!row) continue;
-    years.push({ y, noi:row.noi, gpr:row.gpr,
+    years.push({ y, noi:row.noi, netIncome:row.netIncome, cashOnCash:row.cashOnCash, yieldOnCost:row.yieldOnCost,
       econ:1-(uw.econVacForYear?uw.econVacForYear(y):uw.stabVac),
-      margin:row.gpr>0?row.noi/row.gpr:null,
       stab:y>=uw.stabYear });
   }
   if (!years.length) return null;
   const METRICS = [
-    { label:'NOI ($M)',        fmt:(r)=>r.noi!=null?('$'+(r.noi/1e6).toFixed(2)+'M'):'—',                                                    bold:true },
-    { label:'YOY Growth',      fmt:(r,i)=>{ if(i===0||!years[i-1]||!years[i-1].noi) return '—'; return _p((r.noi-years[i-1].noi)/years[i-1].noi,1); }, green:true },
-    { label:'Econ. Occupancy', fmt:(r)=>r.econ!=null?_p(r.econ,0):'—',                                                                        blue:true },
-    { label:'NOI Margin',      fmt:(r)=>r.margin!=null?_p(r.margin,0):'—',                                                                    accent:true },
+    { label:'Econ. Occupancy', fmt:(r)=>r.econ!=null?_p(r.econ,0):'—',            color:()=>IC.navy2 },
+    { label:'NOI ($M)',        fmt:(r)=>r.noi!=null?('$'+(r.noi/1e6).toFixed(2)+'M'):'—', color:(r)=>r.stab?IC.pos:IC.navy, bold:true },
+    { label:'YOY Growth',      fmt:(r,i)=>{ if(i===0||!years[i-1]||!years[i-1].noi) return '—'; return _p((r.noi-years[i-1].noi)/years[i-1].noi,1); }, color:()=>IC.pos },
+    { label:'Net Income',      fmt:(r)=>r.netIncome!=null?('$'+(r.netIncome/1e6).toFixed(2)+'M'):'—', color:()=>IC.navy2 },
+    { label:'Total Yield',     fmt:(r)=>r.cashOnCash!=null?_p(r.cashOnCash,1):'—', color:()=>IC.blue, bold:true },
+    { label:'Yield on Cost',   fmt:(r)=>r.yieldOnCost!=null?_p(r.yieldOnCost,1):'—', color:()=>IC.navy },
   ];
   return (
     <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
@@ -347,7 +377,7 @@ function OperatingForecast({ uw }) {
               <td key={r.y} style={{ textAlign:'right', fontVariantNumeric:'tabular-nums',
                 padding:'4px 7px', borderBottom:'1px solid '+IC.line2,
                 fontSize:m.bold?12:11, fontWeight:m.bold?700:500,
-                color:m.bold?(r.stab?IC.pos:IC.navy):m.green?IC.pos:m.blue?IC.navy2:IC.blue }}>
+                color:m.color(r) }}>
                 {m.fmt(r,i)}
               </td>
             ))}
@@ -452,9 +482,7 @@ function ICMemoSheet({ deal }) {
         <div style={{ flex:4, border:'1.5px solid '+IC.line, borderRadius:5, padding:'4px 10px 5px' }}>
           <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase',
             color:IC.blue, marginBottom:3 }}>Loan Terms</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)' }}>
-            <MetricCell label="DSCR (Stab.)" value={dscr!=null?(_n(dscr)+'x'):'—'}
-              color={dscr!=null?(dscr>=1.25?IC.pos:dscr<1.1?IC.neg:IC.warn):IC.faint} />
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)' }}>
             <MetricCell label="LTV"          value={ltv!=null?_p(ltv):'—'}
               color={ltv!=null?(ltv<=.65?IC.pos:ltv>=.75?IC.neg:IC.warn):IC.faint} />
             <MetricCell label="Interest Rate" value={uw&&uw.acqLoan?((uw.acqLoan.rate*100).toFixed(2)+'%'):'—'} />

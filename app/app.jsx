@@ -233,8 +233,15 @@ function DealCard({ d, onOpen, omMap, t12Map, rrMap, onOM, onT12, onRR, onPatch 
 
       {/* Name + type */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
-        <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', flex: 1, lineHeight: 1.3 }}>{d.name}</div>
-        <TypeTag type={d.type} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
+          {onPatch && <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} />}
+          {onPatch && <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} />}
+          <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3 }}>{d.name}</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
+          {d.offMarket && <OffMarketTag size="sm" />}
+          <TypeTag type={d.type} />
+        </div>
       </div>
 
       {/* Location + units */}
@@ -247,7 +254,7 @@ function DealCard({ d, onOpen, omMap, t12Map, rrMap, onOM, onT12, onRR, onPatch 
       <div style={{ display: 'flex', gap: 18, marginBottom: 12 }}>
           {d.askPrice ?
         <div>
-              <div className="num" style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: 1, fontFamily: "Inter" }}>{fmtShort(d.askPrice)}</div>
+              <div className="num" style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: 1, fontFamily: 'var(--font)' }}>{fmtShort(d.askPrice)}</div>
               <div style={{ fontSize: 10.5, color: 'var(--faint)', marginTop: 2 }}>ask</div>
             </div> :
         null}
@@ -321,7 +328,7 @@ function GroupedCards({ deals, onOpen, onOM, onT12, onRR, omMap, t12Map, rrMap, 
 }
 
 /* ========================= Kanban board (board mode) ========================= */
-function BoardCard({ d, onOpen, onDragStart }) {
+function BoardCard({ d, onOpen, onDragStart, onPatch }) {
   const m = computeMetrics(d);
   const caps = window.displayCaps ? window.displayCaps(d) : { goingIn: m.goingInCap, stab: m.stabilizedCap };
   return (
@@ -330,10 +337,17 @@ function BoardCard({ d, onOpen, onDragStart }) {
       cursor: 'pointer', boxShadow: 'var(--shadow)', transition: 'box-shadow .12s, transform .12s' }}
     onMouseEnter={(e) => {e.currentTarget.style.boxShadow = '0 4px 16px rgba(16,30,50,.11)';e.currentTarget.style.transform = 'translateY(-1px)';}}
     onMouseLeave={(e) => {e.currentTarget.style.boxShadow = 'var(--shadow)';e.currentTarget.style.transform = 'none';}}>
-      <div className="clip" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>{d.name}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+        {onPatch && <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} size={13} />}
+        {onPatch && <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} size={13} />}
+        <div className="clip" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{d.name}</div>
+      </div>
       <div className="clip" style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 9, fontWeight: 400 }}>{d.market}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <TypeTag type={d.type} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <TypeTag type={d.type} />
+          {d.offMarket && <OffMarketTag size="sm" />}
+        </div>
         <span className="num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{fmtShort(d.askPrice)}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 9,
@@ -369,7 +383,7 @@ function PipelineBoard({ deals, onOpen, onPatch }) {
               </span>
               <span className="num" style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtShort(items.reduce((s, d) => s + (d.purchasePrice || 0), 0))}</span>
             </div>
-            {items.map((d) => <BoardCard key={d.id} d={d} onOpen={onOpen} onDragStart={drag} />)}
+            {items.map((d) => <BoardCard key={d.id} d={d} onOpen={onOpen} onDragStart={drag} onPatch={onPatch} />)}
             {items.length === 0 &&
             <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: 11.5, color: 'var(--faint)',
               border: '1px dashed var(--line-2)', borderRadius: 8 }}>Drop here</div>
@@ -396,7 +410,7 @@ const TABLE_COLS = [
   { key:'om',           label:'Files',        w:'210px', align:'center' },
 ];
 
-function GroupedTable({ deals, onOpen, omMap, t12Map, rrMap, onOM, onT12, onRR }){
+function GroupedTable({ deals, onOpen, onPatch, omMap, t12Map, rrMap, onOM, onT12, onRR }){
   const groups = STAGE_ALL
     .map(stage=>({ stage, items:deals.filter(d=>d.stage===stage), meta:STAGE_META[stage] }))
     .filter(g=>g.items.length>0);
@@ -448,8 +462,9 @@ function GroupedTable({ deals, onOpen, omMap, t12Map, rrMap, onOM, onT12, onRR }
                   onMouseEnter={e=>e.currentTarget.style.background='var(--accent-soft)'}
                   onMouseLeave={e=>e.currentTarget.style.background=i%2===1?'var(--panel-2)':'var(--panel)'}>
                   {/* Deal name */}
-                  <div style={{ padding:'8px 6px', display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
+                  <div style={{ padding:'8px 6px', display:'flex', alignItems:'center', gap:8, minWidth:0 }} onClick={e=>e.stopPropagation()}>
                     <span className="clip" style={{ fontSize:13.5, fontWeight:600, color:'var(--ink)' }}>{d.name}</span>
+                    <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch && onPatch(d.id, { offMarket: !d.offMarket })} size={12} />
                   </div>
                   {/* Type */}
                   <div style={{ padding:'8px 6px' }}><TypeTag type={d.type}/></div>
@@ -617,9 +632,15 @@ function StatusInput({ value, onChange }) {
   );
 }
 
-function PipelineTable({ deals, onOpen, onPatch, onBulkPatch, onBulkDelete, onReorder, omMap, t12Map, rrMap, onOM, onT12, onRR }) {
-  const [sortKey, setSortKey] = useS('manual');   // manual = persisted drag order; stage edits never reorder
-  const [sortDir, setSortDir] = useS('asc');
+function PipelineTable({ deals, onOpen, onPatch, onBulkPatch, onBulkDelete, onReorder, omMap, t12Map, rrMap, onOM, onT12, onRR, sortKey: sortKeyProp, sortDir: sortDirProp, onSortKeyChange, onSortDirChange }) {
+  const [localSortKey, setLocalSortKey] = useS('manual');   // manual = persisted drag order; stage edits never reorder
+  const [localSortDir, setLocalSortDir] = useS('asc');
+  // sort state is lifted to the app shell when a controller is passed in, so it survives
+  // opening/closing a deal (which unmounts this table) instead of resetting to 'manual'.
+  const sortKey = sortKeyProp !== undefined ? sortKeyProp : localSortKey;
+  const sortDir = sortDirProp !== undefined ? sortDirProp : localSortDir;
+  const setSortKey = onSortKeyChange || setLocalSortKey;
+  const setSortDir = onSortDirChange || setLocalSortDir;
   const [selected, setSelected] = useS([]);        // selected deal ids (bulk)
   const [dragId, setDragId] = useS(null);          // id being dragged
   const [dropTarget, setDropTarget] = useS(null);  // { id, place:'before'|'after' }
@@ -844,6 +865,10 @@ function PipelineTable({ deals, onOpen, onPatch, onBulkPatch, onBulkDelete, onRe
               {/* Deal / Asset — frozen pane */}
               <div style={{ padding: '8px 7px', display: 'flex', alignItems: 'center', gap: 11, minWidth: 0,
                 position: 'sticky', left: nameLeft, zIndex: 2, background: isSel ? 'var(--accent-soft)' : 'var(--panel)' }}>
+                <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} size={14} />
+                  <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} size={13} />
+                </div>
                 <div style={{ minWidth: 0 }}>
                   <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25 }}>{d.name}</div>
                   <div className="clip" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>
@@ -934,7 +959,7 @@ function GripIcon() {
 
 /* ========================= Add deal modal ========================= */
 const TYPE_OPTS = Object.keys(TYPE_META);
-const BLANK_DEAL = { name: '', type: 'Multifamily', bucket: 'Pipeline', stage: 'New Deal', market: '', broker: '', units: '', vintage: '', askPrice: '', purchasePrice: '', capex: '' };
+const BLANK_DEAL = { name: '', type: 'Multifamily', bucket: 'Pipeline', stage: 'New Deal', market: '', broker: '', units: '', vintage: '', askPrice: '', purchasePrice: '', capex: '', offMarket: false };
 
 function MField({ label, children, span }) {
   return (
@@ -993,7 +1018,7 @@ function AddDealModal({ onClose, onAdd }) {
     onAdd({ id: 'new-' + Date.now(), name: f.name.trim(), type: f.type, bucket: f.bucket, stage: f.stage,
       market: f.market.trim(), broker: f.broker.trim(), analyst: null,
       units: num(f.units), purchasePrice: num(f.purchasePrice), askPrice: num(f.askPrice), capex: num(f.capex),
-      vintage: (f.vintage||'').trim() || null,
+      vintage: (f.vintage||'').trim() || null, offMarket: !!f.offMarket,
       trailingEGI: null, currentOpexTotal: null, marketOpexPerUnit: 0, brokerEGI: null, debt: null,
       dateEntered: window.ALTUS_TODAY, dateLOISubmitted: null, loiAmount: null,
       dateUnderContract: null, dateLost: null, notes: '', status: '', _rawStatus: '',
@@ -1067,6 +1092,12 @@ function AddDealModal({ onClose, onAdd }) {
           </MField>
           <MField label="Market"><input value={f.market} onChange={(e) => set('market', e.target.value)} placeholder="City, ST" style={mInput} /></MField>
           <MField label="Broker / Firm"><input value={f.broker} onChange={(e) => set('broker', e.target.value)} placeholder="Firm — Name" style={mInput} /></MField>
+          <MField label="Sourcing" span>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: 'var(--ink)' }}>
+              <input type="checkbox" checked={!!f.offMarket} onChange={(e) => set('offMarket', e.target.checked)} style={{ width: 15, height: 15, cursor: 'pointer' }} />
+              Off-market deal (sourced directly, not a broker listing)
+            </label>
+          </MField>
           <MField label="Units"><input value={f.units} onChange={(e) => set('units', groupNum(e.target.value))} inputMode="numeric" placeholder="0" style={mInput} /></MField>
           <MField label="Vintage"><input value={f.vintage} onChange={(e) => set('vintage', e.target.value)} placeholder="e.g. 1985" style={mInput} /></MField>
           <MField label="Ask price ($)"><input value={f.askPrice} onChange={(e) => set('askPrice', groupNum(e.target.value))} inputMode="numeric" placeholder="0" style={mInput} /></MField>
@@ -1374,7 +1405,10 @@ function SubmarketTable({ deals, onOpen, onPatch, omMap, t12Map, rrMap, onOM, on
                       onMouseEnter={e=>e.currentTarget.style.background='var(--accent-soft)'}
                       onMouseLeave={e=>e.currentTarget.style.background=i%2===1?'var(--panel-2)':'var(--panel)'}>
                       <div style={{ padding:'8px 6px', minWidth:0 }}>
-                        <span className="clip" style={{ fontSize:13.5, fontWeight:600, color:'var(--ink)', display:'block' }}>{d.name}</span>
+                        <div style={{ display:'flex', alignItems:'center', gap:6, minWidth:0 }} onClick={e=>e.stopPropagation()}>
+                          <span className="clip" style={{ fontSize:13.5, fontWeight:600, color:'var(--ink)', display:'block' }}>{d.name}</span>
+                          <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch && onPatch(d.id, { offMarket: !d.offMarket })} size={12} />
+                        </div>
                         {d.broker && <span className="clip" style={{ fontSize:11, color:'var(--muted)', display:'block', marginTop:1 }}>{getBrokerFirm(d.broker)}</span>}
                       </div>
                       <div style={{ padding:'8px 6px' }} onClick={e=>e.stopPropagation()}>
@@ -1406,10 +1440,11 @@ function SubmarketTable({ deals, onOpen, onPatch, omMap, t12Map, rrMap, onOM, on
   );
 }
 
-function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM, onT12, onRR, onBulkPatch, onBulkDelete, onReorder, omMap, t12Map, rrMap, zebra }) {
+function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM, onT12, onRR, onBulkPatch, onBulkDelete, onReorder, omMap, t12Map, rrMap, zebra, sortKey, sortDir, onSortKeyChange, onSortDirChange }) {
   const [q, setQ] = useS('');
   const [type, setType] = useS('All');
   const [stage, setStage] = useS('All');
+  const [offMarketOnly, setOffMarketOnly] = useS(false);
   const [mode, setMode] = useS('table');
   const [adding, setAdding] = useS(false);
   const [importMsg, setImportMsg] = useS('');
@@ -1444,8 +1479,9 @@ function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM,
   const preStage = useM(() => deals.filter((d) => {
     if (q && !(d.name.toLowerCase().includes(q.toLowerCase()) || d.market.toLowerCase().includes(q.toLowerCase()) || (d.broker || '').toLowerCase().includes(q.toLowerCase()))) return false;
     if (type !== 'All' && d.type !== type) return false;
+    if (offMarketOnly && !d.offMarket) return false;
     return true;
-  }), [deals, q, type]);
+  }), [deals, q, type, offMarketOnly]);
   const filtered = useM(() => stage === 'All' ? preStage : preStage.filter((d) => d.stage === stage), [preStage, stage]);
 
   const activeDeals = deals.filter((d) => STAGES.includes(d.stage));
@@ -1478,7 +1514,7 @@ function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM,
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ margin: 0, fontWeight: 600, color: 'var(--ink)', letterSpacing: '-.01em', fontSize: "25px" }}>Pipeline</h2>
-          <p style={{ margin: '3px 0 0', fontWeight: 400, fontFamily: "Tahoma", fontSize: "16px", color: "rgb(0, 0, 0)" }}>
+          <p style={{ margin: '3px 0 0', fontWeight: 400, fontFamily: 'var(--font)', fontSize: '16px', color: 'var(--slate)' }}>
             {activeDeals.length} active deal{activeDeals.length !== 1 ? 's' : ''} · {fmtShort(totalVol)} in review
           </p>
         </div>
@@ -1498,7 +1534,7 @@ function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM,
       <PipelineStats deals={deals} allDeals={allDeals} />
 
       {/* Priority Deals — executive queue */}
-      <PriorityDealsWidget deals={deals} onOpen={onOpen} />
+      <PriorityDealsWidget deals={deals} onOpen={onOpen} onPatch={onPatch} />
 
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -1522,6 +1558,13 @@ function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM,
           </select>
         </div>
         <FilterSelect label="Type" value={type} onChange={setType} options={types} />
+        <button onClick={() => setOffMarketOnly((v) => !v)} title="Show only off-market deals"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 12px', borderRadius: 8,
+            border: '1px solid ' + (offMarketOnly ? 'var(--warn)' : 'var(--line-2)'),
+            background: offMarketOnly ? 'var(--warn-soft)' : 'var(--panel)',
+            color: offMarketOnly ? 'var(--warn)' : 'var(--slate)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+          <Icon name="lock" size={12} /> Off-Market
+        </button>
         <span style={{ fontSize: 12.5, color: 'var(--muted)', fontWeight: 500, marginLeft: 4 }} className="num">
           {filtered.length} deal{filtered.length !== 1 ? 's' : ''}
         </span>
@@ -1550,7 +1593,7 @@ function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM,
       {groupBy === 'market'
         ? <SubmarketTable deals={filtered} onOpen={onOpen} onPatch={onPatch} omMap={omMap} t12Map={t12Map} rrMap={rrMap} onOM={onOM} onT12={onT12} onRR={onRR}/>
         : mode === 'table'
-          ? <PipelineTable deals={filtered} onOpen={onOpen} onPatch={onPatch} onBulkPatch={onBulkPatch} onBulkDelete={onBulkDelete} onReorder={onReorder} omMap={omMap} t12Map={t12Map} rrMap={rrMap} onOM={onOM} onT12={onT12} onRR={onRR}/>
+          ? <PipelineTable deals={filtered} onOpen={onOpen} onPatch={onPatch} onBulkPatch={onBulkPatch} onBulkDelete={onBulkDelete} onReorder={onReorder} omMap={omMap} t12Map={t12Map} rrMap={rrMap} onOM={onOM} onT12={onT12} onRR={onRR} sortKey={sortKey} sortDir={sortDir} onSortKeyChange={onSortKeyChange} onSortDirChange={onSortDirChange}/>
           : <GroupedCards deals={filtered} onOpen={onOpen} onPatch={onPatch} omMap={omMap} t12Map={t12Map} rrMap={rrMap} onOM={onOM} onT12={onT12} onRR={onRR}/>}
 
       {adding && <AddDealModal onClose={() => setAdding(false)} onAdd={onAdd} />}
@@ -1591,7 +1634,7 @@ function DeadDealsView({ deals, onOpen, onPatch, onBulkPatch, onBulkDelete, onRe
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ margin: 0, fontWeight: 600, color: 'var(--ink)', letterSpacing: '-.01em', fontSize: '25px' }}>Dead Deals</h2>
-          <p style={{ margin: '3px 0 0', fontWeight: 400, fontFamily: 'Tahoma', fontSize: '16px', color: 'rgb(0,0,0)' }}>
+          <p style={{ margin: '3px 0 0', fontWeight: 400, fontFamily: 'var(--font)', fontSize: '16px', color: 'var(--slate)' }}>
             {deals.length} passed or lost deal{deals.length !== 1 ? 's' : ''} · change a stage to revive one back into the pipeline
           </p>
         </div>
@@ -2259,6 +2302,9 @@ function AltusApp() {
   const todosLoaded = useR(false);
   const todosSaveTimer = useR(null);
   const dealsRef = useR(deals);          // always-fresh deals for the unload flush
+  const justSavedDealsRef = useR({});    // id -> JSON snapshot of what we last pushed, to ignore self-echoes
+  const [pipeSortKey, setPipeSortKey] = useS('manual');
+  const [pipeSortDir, setPipeSortDir] = useS('asc');
   const [saveState, setSaveState] = useS('idle'); // idle | dirty | saving | saved | error
 
   useE(() => {
@@ -2384,6 +2430,9 @@ function AltusApp() {
       clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         setSaveState('saving');
+        const snap = {};
+        dealsRef.current.forEach((d) => { snap[d.id] = JSON.stringify(d); });
+        justSavedDealsRef.current = snap;
         cloud.saveDeals(dealsRef.current)
           .then(() => setSaveState('saved'))
           .catch((e) => { console.warn('[cloud] save failed', e); setSaveState('error'); });
@@ -2423,6 +2472,10 @@ function AltusApp() {
         return;
       }
       const incoming = migrateDeals([{ ...(payload.new.data || {}), id: payload.new.id }])[0];
+      // Skip echoes of our own recent save — the debounced upload can round-trip back
+      // via realtime after the user has already typed further, and applying it would
+      // stomp those newer keystrokes with the older snapshot we ourselves just sent.
+      if (justSavedDealsRef.current[incoming.id] === JSON.stringify(incoming)) return;
       setDeals((ds) => {
         const existing = ds.find((d) => d.id === incoming.id);
         if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ds;
@@ -2929,7 +2982,7 @@ ${text}`;
         </div>
       )}
 
-      <main ref={mainRef} style={{ flex: 1, overflow: 'auto', position: 'relative', fontFamily: "\"IBM Plex Sans\"" }} data-comment-anchor="922d83631c-main-640-7">
+      <main ref={mainRef} style={{ flex: 1, overflow: 'auto', position: 'relative', fontFamily: 'var(--font)' }} data-comment-anchor="922d83631c-main-640-7">
         {deal ? <DealDetail deal={deal} onBack={() => setOpenId(null)} onPatch={patch} contacts={contacts}
         omData={omMap[deal.id]} onAcceptOM={acceptOM}
         onOMUpload={handleOMUpload}
@@ -2943,6 +2996,7 @@ ${text}`;
         onAdd={addDeal} onImport={importDeals} onOM={handleOMUpload} onT12={handleT12Upload} onRR={handleRentRollUpload}
         onBulkPatch={bulkPatch} onBulkDelete={bulkDelete} onReorder={reorderVisible}
         omMap={omMap} t12Map={t12Map} rrMap={rrMap}
+        sortKey={pipeSortKey} sortDir={pipeSortDir} onSortKeyChange={setPipeSortKey} onSortDirChange={setPipeSortDir}
         zebra={t.zebra} /> :
         view === 'loi' ? <LOIStatusView deals={loiDeals} onOpen={open} onPatch={patch} /> :
         view === 'metrics' ? <MetricsView deals={liveDeals} onOpen={open} /> :

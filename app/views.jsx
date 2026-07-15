@@ -67,17 +67,22 @@ const PRIORITY_META = {
   Low:    { color: '#5b7088', bg: '#eef1f5' },
 };
 
-function PriorityDealsWidget({ deals, onOpen }) {
+function PriorityDealsWidget({ deals, onOpen, onPatch }) {
   const LS_PRIORITY_LIMIT = 'altus_priority_limit_v1';
+  const LS_PRIORITY_COLLAPSED = 'altus_priority_collapsed_v1';
   const [limit, setLimit] = useStateV(() => {
     try { const v = parseInt(localStorage.getItem(LS_PRIORITY_LIMIT)); return [5,7,10].includes(v) ? v : 7; } catch(e) { return 7; }
   });
   const updateLimit = (n) => { setLimit(n); try { localStorage.setItem(LS_PRIORITY_LIMIT, n); } catch(e) {} };
+  const [collapsed, setCollapsed] = useStateV(() => {
+    try { return localStorage.getItem(LS_PRIORITY_COLLAPSED) === '1'; } catch(e) { return false; }
+  });
+  const toggleCollapsed = () => { setCollapsed((c) => { const next = !c; try { localStorage.setItem(LS_PRIORITY_COLLAPSED, next ? '1' : '0'); } catch(e) {} return next; }); };
 
   const rows = useMemoV(() => {
-    const active = deals.filter((d) => PRIORITY_ACTIVE_STAGES.includes(d.stage));
-    return active
-      .map((d) => { const { score, topReason } = _computeDealPriority(d); return { deal: d, score, topReason, level: _getPriorityLevel(d, score) }; })
+    const pool = deals.filter((d) => d.starred || PRIORITY_ACTIVE_STAGES.includes(d.stage));
+    return pool
+      .map((d) => { const { score, topReason } = _computeDealPriority(d); return { deal: d, score: score + (d.starred ? 100000 : 0), topReason, level: d.starred ? 'High' : _getPriorityLevel(d, score) }; })
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
   }, [deals, limit]);
@@ -90,14 +95,16 @@ function PriorityDealsWidget({ deals, onOpen }) {
     <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)', marginBottom: 18, overflow: 'hidden' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 18px', borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 18px', borderBottom: collapsed ? 'none' : '1px solid var(--line)', background: 'var(--panel)' }}>
+        <button onClick={toggleCollapsed} style={{ display: 'flex', alignItems: 'center', gap: 9, border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
           <span style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--navy)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
             <Icon name="target" size={13} />
           </span>
           <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-.01em' }}>Priority Deals</span>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>Top {rows.length} by urgency &amp; opportunity</span>
-        </div>
+          <Icon name={collapsed ? 'chevR' : 'chevD'} size={13} style={{ color: 'var(--faint)' }} />
+        </button>
+        {!collapsed &&
         <div style={{ display: 'flex', gap: 4 }}>
           {[5, 7, 10].map((n) => (
             <button key={n} onClick={() => updateLimit(n)} style={{
@@ -107,13 +114,14 @@ function PriorityDealsWidget({ deals, onOpen }) {
               Top {n}
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
+      {!collapsed && <React.Fragment>
       {/* Column headers */}
-      <div style={{ display: 'grid', gridTemplateColumns: '84px 1fr 120px 160px 124px', padding: '0 18px', background: 'var(--panel-3)', borderBottom: '1px solid var(--line)' }}>
-        {[['Priority', 'left'], ['Deal', 'left'], ['Stage', 'left'], ['Why Now', 'left'], ['CFO Date', 'right']].map(([h, align]) => (
-          <div key={h} style={{ padding: '6px 0', fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: align }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '30px 84px 1fr 120px 160px 124px', padding: '0 18px', background: 'var(--panel-3)', borderBottom: '1px solid var(--line)' }}>
+        {['', 'Priority', 'Deal', 'Stage', 'Why Now', 'CFO Date'].map((h, i) => (
+          <div key={h+i} style={{ padding: '6px 0', fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: i===5?'right':'left' }}>
             {h}
           </div>
         ))}
@@ -126,13 +134,18 @@ function PriorityDealsWidget({ deals, onOpen }) {
         const cfoInDays = cfoD ? Math.round((cfoD - today) / 86400000) : null;
         const hasCFO = cfoInDays != null && cfoInDays >= 0;
         return (
-          <button key={deal.id} onClick={() => onOpen(deal.id)}
-            style={{ display: 'grid', gridTemplateColumns: '84px 1fr 120px 160px 124px', alignItems: 'center',
-              width: '100%', padding: '0 18px', minHeight: 42, border: 'none',
+          <div key={deal.id} onClick={() => onOpen(deal.id)}
+            style={{ display: 'grid', gridTemplateColumns: '30px 84px 1fr 120px 160px 124px', alignItems: 'center',
+              width: '100%', padding: '0 18px', minHeight: 42,
               borderBottom: i < rows.length - 1 ? '1px solid var(--line)' : 'none',
               background: 'transparent', textAlign: 'left', cursor: 'pointer', transition: 'background .1s', fontFamily: 'var(--font)' }}
             onMouseEnter={(e) => e.currentTarget.style.background = 'var(--accent-soft)'}
             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+
+            {/* Star */}
+            <div onClick={(e) => e.stopPropagation()}>
+              {onPatch && <StarToggle on={!!deal.starred} onToggle={() => onPatch(deal.id, { starred: !deal.starred })} size={14} />}
+            </div>
 
             {/* Priority badge */}
             <div>
@@ -155,7 +168,7 @@ function PriorityDealsWidget({ deals, onOpen }) {
                   {topReason.text}
                 </span>
               ) : (
-                <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
+                <span style={{ fontSize: 12, color: 'var(--faint)' }}>{deal.starred ? 'Starred' : '—'}</span>
               )}
             </div>
 
@@ -170,9 +183,10 @@ function PriorityDealsWidget({ deals, onOpen }) {
                 <span style={{ fontSize: 12, color: 'var(--faint)' }}>—</span>
               )}
             </div>
-          </button>
+          </div>
         );
       })}
+      </React.Fragment>}
     </div>
   );
 }
@@ -200,6 +214,7 @@ function windowMetrics(deals, days, endOffsetDays=0){
   const loiSub = deals.filter(d=> inWindow(d.dateLOISubmitted, days, endOffsetDays));
   const loiWon = deals.filter(d=> WON.includes(d.stage) && inWindow(d.dateUnderContract, days, endOffsetDays));
   const loiLost = deals.filter(d=> d.stage==='LOI Lost' && inWindow(d.dateLost, days, endOffsetDays));
+  const offMarket = entered.filter(d=> d.offMarket);
   const sum = (arr,f)=> arr.reduce((s,d)=>s+(f(d)||0),0);
   return {
     entered: entered.length,
@@ -207,6 +222,7 @@ function windowMetrics(deals, days, endOffsetDays=0){
     loiSubmitted: loiSub.length,
     loiWon: loiWon.length,
     loiLost: loiLost.length,
+    offMarket: offMarket.length,
     dollarSubmitted: sum(loiSub, d=> d.loiAmount || d.purchasePrice),
     dollarWon: sum(loiWon, d=> d.loiAmount || d.purchasePrice),
     convRate: loiSub.length ? loiWon.length / loiSub.length : 0,
@@ -257,6 +273,14 @@ function MetricsView({ deals, onOpen }){
              delta={d(cur.loiSubmitted,prev.loiSubmitted)} sub={isAll?'':'vs prior period'}/>
         <Kpi label="LOIs Won" value={fmtNum(cur.loiWon)} icon="check" accent="#0f8a4d"
              delta={d(cur.loiWon,prev.loiWon)} sub="under contract"/>
+      </div>
+
+      {/* off-market tracker — underneath Deals Entered */}
+      <div style={{ display:'flex', marginTop:14 }}>
+        <div style={{ width:260, flex:'none' }}>
+          <Kpi label="Off-Market Deals" value={fmtNum(cur.offMarket)} icon="lock" accent="var(--warn)"
+               delta={d(cur.offMarket,prev.offMarket)} sub={cur.entered ? fmtPct(cur.offMarket/cur.entered,0)+' of entered' : 'sourced directly'}/>
+        </div>
       </div>
 
       {/* dollar volume + conversion */}

@@ -129,8 +129,22 @@ function Icon({ name, size=16, style }){
     download: <><path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M4 19h16"/></>,
     expand:   <><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></>,
     trash:    <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></>,
+    star:     <path d="M12 2.5l3.09 6.26 6.91 1-5 4.87 1.18 6.87L12 17.9l-6.18 3.6L7 14.63l-5-4.87 6.91-1z" strokeLinejoin="round"/>,
+    lock:     <><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></>,
   };
   return <svg {...p}>{paths[name]}</svg>;
+}
+
+/* ── Star toggle — click to mark a deal as priority-starred ── */
+function StarToggle({ on, onToggle, size = 15 }) {
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      title={on ? 'Remove from Priority Deals' : 'Star for Priority Deals'}
+      style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', display: 'inline-flex',
+        alignItems: 'center', justifyContent: 'center', flex: 'none', lineHeight: 0 }}>
+      <Icon name="star" size={size} style={{ color: on ? '#e0a715' : 'var(--faint)', fill: on ? '#e0a715' : 'none' }} />
+    </button>
+  );
 }
 
 /* ============================ Primitives ============================ */
@@ -155,6 +169,31 @@ function StageBadgeSolid({ stage, count }){
       boxShadow:'0 1px 2px '+m.c+'55' }}>
       {m.label}
       {count!=null && <span className="num" style={{ background:'rgba(255,255,255,.22)', borderRadius:999, padding:'2px 9px', fontSize:12.5, fontWeight:700 }}>{count}</span>}
+    </span>
+  );
+}
+/* ── Off-market toggle — click to mark a deal as off-market without opening it ── */
+function OffMarketToggle({ on, onToggle, size = 13 }) {
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      title={on ? 'Off-market — click to unmark' : 'Mark as off-market'}
+      style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', display: 'inline-flex',
+        alignItems: 'center', justifyContent: 'center', flex: 'none', lineHeight: 0 }}>
+      <Icon name="lock" size={size} style={{ color: on ? 'var(--warn)' : 'var(--faint)' }} />
+    </button>
+  );
+}
+
+/* Off-market identifier — deals sourced directly, not via broker listing */
+function OffMarketTag({ size='md', style }){
+  const pad = size==='sm' ? '2px 7px' : '3px 9px';
+  const fs = size==='sm' ? 10.5 : 11.5;
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:pad, borderRadius:999,
+      background:'var(--warn-soft)', color:'var(--warn)', fontSize:fs, fontWeight:700,
+      letterSpacing:'.02em', whiteSpace:'nowrap', lineHeight:1.3, ...style }}>
+      <Icon name="lock" size={size==='sm'?9:10} style={{ color:'var(--warn)' }}/>
+      Off-Market
     </span>
   );
 }
@@ -338,5 +377,5 @@ Object.assign(window, {
   STAGES, STAGE_ALL, STAGE_META, PIPELINE_STAGES, LOI_STAGES,
   normalizeStage, isPipelineStage, isLOIStage, isDeadStage,
   TYPE_META, computeMetrics, ASSIGNEES, ASSIGNEE_COLOR, AssigneePicker,
-  Icon, StageBadge, StageBadgeSolid, TypeTag, Avatar, Delta, Kpi, Seg, Bar, Donut, Card,
+  Icon, StageBadge, StageBadgeSolid, TypeTag, OffMarketTag, OffMarketToggle, Avatar, Delta, Kpi, Seg, Bar, Donut, Card,
 });

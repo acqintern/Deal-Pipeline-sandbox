@@ -697,6 +697,12 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
               fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 12.5, flex: 'none' }}>Pipeline</button>
             <Icon name="chevR" size={12} style={{ color: 'var(--faint)', flex: 'none' }} />
             <span className="clip" style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)', maxWidth: 320, flex: 'none' }}>{deal.name}</span>
+            <select value={deal.stage} onChange={(e) => set('stage', e.target.value)}
+              style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '5px 9px',
+                background: 'var(--panel)', fontSize: 12.5, fontWeight: 600, flex: 'none',
+                color: (STAGE_META[deal.stage] || STAGE_META['New Deal']).c, cursor: 'pointer' }}>
+              {STAGE_ALL.map((s) => <option key={s} value={s}>{STAGE_META[s].label}</option>)}
+            </select>
             <span style={{ width: 1, height: 18, background: 'var(--line)', flex: 'none' }} />
             <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: 'var(--muted)', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
               <span style={{ flex: 'none' }}>{deal.type}</span>
@@ -705,12 +711,6 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
               {deal.vintage ? <><Sep /><span className="num" style={{ flex: 'none' }}>Built {deal.vintage}</span></> : null}
             </div>
           </div>
-          <select value={deal.stage} onChange={(e) => set('stage', e.target.value)}
-            style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '5px 9px',
-              background: 'var(--panel)', fontSize: 12.5, fontWeight: 600, flex: 'none',
-              color: (STAGE_META[deal.stage] || STAGE_META['New Deal']).c, cursor: 'pointer' }}>
-            {STAGE_ALL.map((s) => <option key={s} value={s}>{STAGE_META[s].label}</option>)}
-          </select>
         </div>
       )}
 
@@ -718,7 +718,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
       <div style={{ background: 'var(--panel)' }}>
         <div style={{ padding: '14px 28px 0' }}>
           {/* breadcrumb + stage select */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, minWidth: 0 }}>
               <button onClick={onBack} style={{ border: 'none', background: 'none', color: 'var(--accent)',
                 fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 12.5 }}>Pipeline</button>
@@ -726,6 +726,9 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
               <span className="clip" style={{ color: 'var(--muted)', maxWidth: 440 }}>{deal.name}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 'none' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Assignee</span>
+              <AssigneePicker value={deal.assignees} onChange={(v) => set('assignees', v)} size={26} />
+              <span style={{ width: 1, height: 18, background: 'var(--line)', flex: 'none' }} />
               <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Stage</span>
               <select value={deal.stage} onChange={(e) => set('stage', e.target.value)}
               style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '6px 9px',
@@ -740,7 +743,15 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
             <div style={{ minWidth: 0 }}>
               <div ref={titleSentinelRef} style={{ position: 'absolute', top: 0, left: 0, height: 1, width: 1, pointerEvents: 'none' }} />
-              <EditableTitle value={deal.name} onCommit={(v)=>set('name', v)} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <EditableTitle value={deal.name} onCommit={(v)=>set('name', v)} />
+                <button onClick={() => set('offMarket', !deal.offMarket)} title={deal.offMarket ? 'Marked off-market — click to remove' : 'Mark as an off-market deal'}
+                  style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', flex: 'none' }}>
+                  {deal.offMarket
+                    ? <OffMarketTag />
+                    : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, color: 'var(--faint)', border: '1px dashed var(--line-2)' }}>+ Off-Market</span>}
+                </button>
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', marginTop: 9, fontSize: 13, color: 'var(--muted)', flexWrap: 'wrap' }}>
                 <TypeTag type={deal.type} />
                 <Sep /><span>{deal.market || '—'}</span>
