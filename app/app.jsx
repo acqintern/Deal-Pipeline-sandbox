@@ -273,6 +273,14 @@ function DealCard({ d, onOpen, omMap, t12Map, rrMap, onOM, onT12, onRR, onPatch 
         </div>
       }
 
+      {/* Analyst Screener (placeholder — not wired up yet) */}
+      <button onClick={(e) => e.stopPropagation()} title="Analyst Screener — coming soon"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'none',
+          color: 'var(--accent)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', padding: 0,
+          marginBottom: 10, fontFamily: 'var(--font)' }}>
+        <Icon name="search" size={12} /> Analyst Screener
+      </button>
+
       {/* Footer */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         paddingTop: 10, borderTop: '1px solid var(--line)', gap: 6 }}>
@@ -959,7 +967,7 @@ function GripIcon() {
 
 /* ========================= Add deal modal ========================= */
 const TYPE_OPTS = Object.keys(TYPE_META);
-const BLANK_DEAL = { name: '', type: 'Multifamily', bucket: 'Pipeline', stage: 'New Deal', market: '', broker: '', units: '', vintage: '', askPrice: '', purchasePrice: '', capex: '', offMarket: false };
+const BLANK_DEAL = { name: '', type: 'Multifamily', bucket: 'Pipeline', stage: 'New Deal', market: '', broker: '', units: '', vintage: '', askPrice: '', purchasePrice: '', capex: '', offMarket: false, isPortfolio: false, properties: [] };
 
 function MField({ label, children, span }) {
   return (

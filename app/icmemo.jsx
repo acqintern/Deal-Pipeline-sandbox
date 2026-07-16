@@ -77,7 +77,7 @@ function MetricCell({ label, value, color, last }) {
 }
 
 // ─── Capital structure donut ──────────────────────────────────────────────────
-function CapDonut({ uw, basis }) {
+function CapDonut({ uw, basis, deal }) {
   if (!uw) return null;
   const debt   = uw.acqProceeds||0;
   const equity = uw.initialEquity||(basis-debt);
@@ -89,6 +89,8 @@ function CapDonut({ uw, basis }) {
   const ltv    = uw.price>0 ? debt/uw.price : null;
   const stabRow = uw.rows ? uw.rows[Math.min(uw.stabYear||3,uw.hold)] : null;
   const dscr    = stabRow ? stabRow.dscr : null;
+  const scenario = deal.acqFin && deal.acqFin.scenario;
+  const finLabel = scenario && scenario!=='Custom' ? scenario : (uw.acqLabel==='Assumed debt' ? 'Assumable Loan' : uw.acqLabel);
   return (
     <div style={{ display:'flex', gap:10, alignItems:'center', padding:'4px 11px 6px' }}>
       <div style={{ flexShrink:0 }}>
@@ -118,7 +120,7 @@ function CapDonut({ uw, basis }) {
           </div>
         ))}
         {uw.acqLoan && (
-          [['Financing', uw.acqLabel||'—'],
+          [['Financing', finLabel||'—'],
            ['LTV', ltv!=null?_p(ltv):'—'],
            ['Interest Rate', (uw.acqLoan.rate*100).toFixed(2)+'%'],
            ['Amortization', Math.round(uw.acqLoan.amMonths/12)+' Yrs'],
@@ -140,6 +142,7 @@ function CapDonut({ uw, basis }) {
               color:IC.blue, marginBottom:2 }}>Refinance — Year {uw.refiYear}</div>
             {[['Refi Proceeds', _ms(uw.refiProceeds)],
               ['Refi Rate', (uw.refiLoan.rate*100).toFixed(2)+'%'],
+              ['Refi Amortization', Math.round(uw.refiLoan.amMonths/12)+' Yrs'],
               ['Cash-Out to Equity', _ms(uw.refiCashOut)]].map(([l,v]) => (
               <div key={l} style={{ display:'flex', alignItems:'center', gap:6,
                 padding:'2px 0', borderBottom:'1px solid '+IC.line2 }}>
@@ -304,30 +307,59 @@ function ReturnDecomp({ uw }) {
   );
 }
 
+// ─── Return summary (no DSCR — that lives with Capital Structure) ─────────────
+function ReturnSummaryPanel({ uw, lp }) {
+  if (!uw) return (
+    <div style={{ padding:'8px 11px', fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>
+  );
+  const irrColor = uw.irr!=null?(uw.irr>=.18?IC.pos:uw.irr<.12?IC.neg:IC.warn):IC.faint;
+  const emColor  = uw.equityMultiple!=null?(uw.equityMultiple>=2?IC.pos:uw.equityMultiple<1.5?IC.neg:IC.warn):IC.faint;
+  const rows = [
+    ['Deal IRR', _p(uw.irr), true],
+    ['Avg Deal Yield', _p(uw.avgYield)],
+    ['Equity Multiple', _x(uw.equityMultiple)],
+    ['Total Profit', _ms(uw.profit)],
+    ['Exit Cap Rate', _r(uw.exitCap*100), false, true],
+    ['Hold Period', uw.hold+' Years'],
+  ];
+  if (lp) rows.push(
+    ['LP IRR', _p(lp.lpIRR), false, true],
+    ['Avg LP Yield', _p(lp.avgLpYield)],
+    ['LP Equity Multiple', _x(lp.lpMultiple)],
+    ['Total GP Promote', _ms(lp.gpPromote)],
+  );
+  return rows.map(([lbl,val,strong,sep],i) => {
+    const color = lbl==='Deal IRR' ? irrColor : lbl==='Equity Multiple' ? emColor : undefined;
+    return (
+      <div key={lbl} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+        padding:'2px 11px', borderBottom:'1px solid '+IC.line2,
+        borderTop: sep ? '1px solid '+IC.line : 'none' }}>
+        <span style={{ fontSize:11, color:IC.muted }}>{lbl}</span>
+        <span style={{ fontSize:11, fontWeight:strong?700:500, color:color||IC.navy,
+          fontVariantNumeric:'tabular-nums' }}>{val}</span>
+      </div>
+    );
+  });
+}
+
 // ─── Underwriting assumptions ─────────────────────────────────────────────────
 function UWAssumptions({ uw }) {
   if (!uw) return null;
   const items = [
-    { icon:'chart',  label:'Rent Growth',    val:_p(uw.gprGrowth)+' /yr' },
-    { icon:'sun',    label:'Expense Growth', val:_p(uw.opexGrowth)+' /yr' },
-    { icon:'grid',   label:'Stab. Vacancy',  val:_p(uw.stabVac) },
-    { icon:'arrow',  label:'Exit Cap Rate',  val:_r(uw.exitCap*100) },
-    { icon:'clock',  label:'Hold Period',    val:uw.hold+' Years' },
+    { label:'Rent Growth',    val:_p(uw.gprGrowth)+' /yr' },
+    { label:'Expense Growth', val:_p(uw.opexGrowth)+' /yr' },
+    { label:'Stab. Vacancy',  val:_p(uw.stabVac) },
+    { label:'Exit Cap Rate',  val:_r(uw.exitCap*100) },
+    { label:'Hold Period',    val:uw.hold+' Years' },
   ];
   return (
-    <div style={{ display:'flex', height:'100%' }}>
+    <div style={{ display:'flex' }}>
       {items.map((item,i) => (
-        <div key={item.label} style={{ flex:1, display:'flex', flexDirection:'column',
-          alignItems:'center', textAlign:'center', padding:'5px 3px 6px',
+        <div key={item.label} style={{ flex:1, textAlign:'center', padding:'6px 3px',
           borderRight: i<items.length-1 ? '1px solid '+IC.line : 'none' }}>
-          <div style={{ width:22, height:22, background:'#f2f4f8', borderRadius:5,
-            display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4 }}>
-            <Icon name={item.icon} size={13} style={{ color:IC.navy2 }} />
-          </div>
-          <div style={{ fontSize:8, fontWeight:600, letterSpacing:'.07em', textTransform:'uppercase',
-            color:IC.muted, marginBottom:3, lineHeight:1.3, minHeight:16,
-            display:'flex', alignItems:'flex-end', justifyContent:'center' }}>{item.label}</div>
-          <div style={{ fontSize:13, fontWeight:700, color:IC.navy, lineHeight:1 }}>{item.val}</div>
+          <div style={{ fontSize:8, fontWeight:600, letterSpacing:'.06em', textTransform:'uppercase',
+            color:IC.muted, marginBottom:2 }}>{item.label}</div>
+          <div style={{ fontSize:12, fontWeight:700, color:IC.navy, lineHeight:1 }}>{item.val}</div>
         </div>
       ))}
     </div>
@@ -416,6 +448,7 @@ function ICMemoSheet({ deal }) {
   const dscr    = stabRow ? stabRow.dscr : null;
   const yoc     = stabRow ? stabRow.yieldOnCost : null;
   const ltv     = uw&&uw.price>0 ? (uw.acqProceeds||0)/uw.price : null;
+  const lp      = uw && window.computeLP ? (()=>{ try { return window.computeLP(uw, { pref:deal.lpPref, split:deal.lpSplit }); } catch(e) { return null; } })() : null;
 
   const statusLabel = { 'New Deal':'Early Stage','Quick UW':'Early Stage','Full UW':'Full UW',
     'Excel UW':'Full UW','LOI Submitted':'LOI Stage','Under Contract':'Under Contract' }[deal.stage]||'IC Review';
@@ -427,7 +460,7 @@ function ICMemoSheet({ deal }) {
   const emColor  = em!=null?(em>=2?IC.pos:em<1.5?IC.neg:IC.warn):IC.faint;
 
   return (
-    <div id="ic-memo-sheet" style={{ width:1200, background:IC.bg, color:IC.navy,
+    <div id="ic-memo-sheet" style={{ width:1020, background:IC.bg, color:IC.navy,
       fontFamily:IC.sans, WebkitFontSmoothing:'antialiased' }}>
 
       {/* ── HEADER ── */}
@@ -439,16 +472,7 @@ function ICMemoSheet({ deal }) {
             Altus Equity – Investment Committee Memo – Confidential
           </div>
           <div style={{ fontSize:26, fontWeight:700, color:'#fff', lineHeight:1.05,
-            marginBottom:3, fontFamily:IC.serif }}>{deal.name||'Untitled Deal'}</div>
-          <div style={{ display:'flex', alignItems:'center', whiteSpace:'nowrap',
-            fontSize:11, color:'rgba(255,255,255,.62)', fontWeight:500 }}>
-            {[deal.market, deal.type,
-              deal.units?(deal.units.toLocaleString()+' Units'):null,
-              deal.vintage?('Built '+deal.vintage):null]
-              .filter(Boolean).map((t,i) => (
-              <span key={i}>{i>0&&<span style={{ opacity:.4, margin:'0 7px' }}>•</span>}{t}</span>
-            ))}
-          </div>
+            fontFamily:IC.serif }}>{deal.name||'Untitled Deal'}</div>
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
           <div style={{ display:'inline-flex', alignItems:'center', gap:7,
@@ -464,82 +488,37 @@ function ICMemoSheet({ deal }) {
         </div>
       </div>
 
-      {/* ── METRICS BAR ── */}
-      <div style={{ background:IC.panel, borderBottom:'1px solid '+IC.line,
-        padding:'4px 10px', display:'flex', gap:8 }}>
-        <div style={{ flex:6, border:'1.5px solid '+IC.line, borderRadius:5, padding:'4px 10px 5px' }}>
-          <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase',
-            color:IC.blue, marginBottom:3 }}>Deal Metrics</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)' }}>
-            <MetricCell label="Deal IRR"        value={_p(irr)}             color={irrColor} />
-            <MetricCell label="Equity Multiple"  value={_x(em)}              color={emColor} />
-            <MetricCell label="Yield on Cost"    value={_p(yoc||caps.stab)}  color={IC.blue} />
-            <MetricCell label="Going-In Cap"     value={_p(caps.goingIn)} />
-            <MetricCell label="Exit Cap Rate"    value={uw?_r(uw.exitCap*100):'—'} />
-            <MetricCell label="Hold Period"      value={uw?(uw.hold+' Yrs'):'—'} last />
-          </div>
-        </div>
-        <div style={{ flex:4, border:'1.5px solid '+IC.line, borderRadius:5, padding:'4px 10px 5px' }}>
-          <div style={{ fontSize:9, fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase',
-            color:IC.blue, marginBottom:3 }}>Loan Terms</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)' }}>
-            <MetricCell label="LTV"          value={ltv!=null?_p(ltv):'—'}
-              color={ltv!=null?(ltv<=.65?IC.pos:ltv>=.75?IC.neg:IC.warn):IC.faint} />
-            <MetricCell label="Interest Rate" value={uw&&uw.acqLoan?((uw.acqLoan.rate*100).toFixed(2)+'%'):'—'} />
-            <MetricCell label="Amortization"  value={uw&&uw.acqLoan?(Math.round(uw.acqLoan.amMonths/12)+' Yrs'):'—'} last />
-          </div>
-        </div>
-      </div>
-
       {/* ── BODY ── */}
       <div style={{ padding:'5px', display:'flex', flexDirection:'column', gap:5 }}>
 
-        {/* TOP ROW */}
-        <div style={{ display:'grid', gridTemplateColumns:'270px 1fr', gap:5 }}>
-
-          {/* LEFT COLUMN */}
-          <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-            <div style={panel}>
-              <PanelHdr>Deal Snapshot</PanelHdr>
-              {[
-                ['Purchase Price',  _m(deal.purchasePrice)],
-                ['CapEx Budget',    _m(deal.capex)],
-                ['Total Basis',     _m(basis), true],
-                ['Units',           deal.units?deal.units.toLocaleString():'—'],
-                ['Year Built',      deal.vintage||'—'],
-                ['Current Occ.',   uw?_p(1-uw.inPlaceEconVac,0):'—'],
-                ['Econ. Vacancy',  uw?_p(uw.inPlaceEconVac):'—'],
-                ['Avg Rent / Mo',  uw&&uw.gpr0&&deal.units?'$'+Math.round(uw.gpr0/deal.units/12).toLocaleString():'—'],
-                ['Year-1 NOI',     yr1Row?_m(yr1Row.noi):'—'],
-                ['Stabilized NOI', stabRow?_m(stabRow.noi):'—'],
-                ['Going-In Cap',   _p(caps.goingIn), false, true],
-                ['Yield on Cost',  _p(yoc||caps.stab)],
-              ].map(([lbl,val,s,sep])=><DR key={lbl} label={lbl} value={val} strong={!!s} sep={!!sep} />)}
-            </div>
-            <div style={panel}>
-              <PanelHdr>Capital Structure & Financing</PanelHdr>
-              <CapDonut uw={uw} basis={basis} />
-            </div>
-          </div>
-
-          {/* SCENARIO ANALYSIS */}
+        {/* TOP ROW — Deal Snapshot | Return Summary | Capital Structure & Financing */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:5 }}>
           <div style={panel}>
-            <div style={{ padding:'4px 11px 4px', borderBottom:'1px solid '+IC.line,
-              display:'flex', alignItems:'baseline', gap:10 }}>
-              <span style={{ fontSize:10, fontWeight:700, letterSpacing:'.08em',
-                textTransform:'uppercase', color:IC.navy }}>Scenario Analysis</span>
-              <span style={{ fontSize:9.5, color:IC.muted, fontStyle:'italic' }}>
-                Average hold-period yield and IRR at the deal and LP level across three cases.
-              </span>
-            </div>
-            <div style={{ padding:'5px 11px 6px' }}>
-              <ScenarioAnalysis deal={deal} uw={uw} />
-            </div>
+            <PanelHdr>Deal Snapshot</PanelHdr>
+            {[
+              ['Purchase Price',  _m(deal.purchasePrice)],
+              ['CapEx Budget',    _m(deal.capex)],
+              ['Total Basis',     _m(basis), true],
+              ['Units',           deal.units?deal.units.toLocaleString():'—'],
+              ['Year Built',      deal.vintage||'—'],
+              ['Physical Occupancy', uw?_p(1-uw.inPlaceEconVac,0):'—'],
+              ['Econ. Vacancy',  uw?_p(uw.inPlaceEconVac):'—'],
+              ['Going-In Cap',   _p(caps.goingIn), false, true],
+              ['Stabilized Cap (Yr '+(uw?(uw.stabYear||3):3)+')', _p(caps.stab)],
+            ].map(([lbl,val,s,sep])=><DR key={lbl} label={lbl} value={val} strong={!!s} sep={!!sep} />)}
+          </div>
+          <div style={panel}>
+            <PanelHdr>Return Summary</PanelHdr>
+            <ReturnSummaryPanel uw={uw} lp={lp} />
+          </div>
+          <div style={panel}>
+            <PanelHdr>Capital Structure & Financing</PanelHdr>
+            <CapDonut uw={uw} basis={basis} deal={deal} />
           </div>
         </div>
 
-        {/* BOTTOM ROW */}
-        <div style={{ display:'grid', gridTemplateColumns:'27fr 31fr 42fr', gap:5 }}>
+        {/* ROW 2 — Return Decomposition | Underwriting Assumptions */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 }}>
           <div style={panel}>
             <PanelHdr>Return Decomposition</PanelHdr>
             {uw ? <ReturnDecomp uw={uw} /> :
@@ -550,12 +529,29 @@ function ICMemoSheet({ deal }) {
             {uw ? <UWAssumptions uw={uw} /> :
               <div style={{ padding:'8px 11px', fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
           </div>
-          <div style={panel}>
-            <PanelHdr>Operating Forecast (NOI)</PanelHdr>
-            <div style={{ padding:'4px 11px 5px' }}>
-              {uw ? <OperatingForecast uw={uw} /> :
-                <div style={{ fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
-            </div>
+        </div>
+
+        {/* ROW 3 — Scenario Analysis (compact) */}
+        <div style={panel}>
+          <div style={{ padding:'4px 11px 4px', borderBottom:'1px solid '+IC.line,
+            display:'flex', alignItems:'baseline', gap:10 }}>
+            <span style={{ fontSize:10, fontWeight:700, letterSpacing:'.08em',
+              textTransform:'uppercase', color:IC.navy }}>Scenario Analysis</span>
+            <span style={{ fontSize:9.5, color:IC.muted, fontStyle:'italic' }}>
+              Average hold-period yield and IRR at the deal and LP level across three cases.
+            </span>
+          </div>
+          <div style={{ padding:'4px 11px 5px' }}>
+            <ScenarioAnalysis deal={deal} uw={uw} />
+          </div>
+        </div>
+
+        {/* ROW 4 — Operating Forecast (NOI) */}
+        <div style={panel}>
+          <PanelHdr>Operating Forecast (NOI)</PanelHdr>
+          <div style={{ padding:'4px 11px 5px' }}>
+            {uw ? <OperatingForecast uw={uw} /> :
+              <div style={{ fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
           </div>
         </div>
 
@@ -672,7 +668,7 @@ function ICMemoButton({ deal, onRunMemo }) {
 
           {busy && !hasMemo ? (
             <div style={{ background:'#fff', borderRadius:12, padding:60, textAlign:'center',
-              width:1200, maxWidth:'94vw', boxSizing:'border-box' }}>
+              width:1020, maxWidth:'94vw', boxSizing:'border-box' }}>
               <div style={{ width:32, height:32, borderRadius:'50%', border:'3px solid var(--accent)',
                 borderTopColor:'transparent', animation:'spin .8s linear infinite', margin:'0 auto 14px' }}/>
               <div style={{ fontSize:15, fontWeight:600, color:'var(--ink)' }}>Drafting IC memo…</div>

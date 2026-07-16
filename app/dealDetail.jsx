@@ -343,6 +343,72 @@ function RailRow({ label, value, num = true, muted }) {
 
 }
 
+/* ── Portfolio: property count stepper ── */
+function PropertyCountStepper({ count, onChange }) {
+  const btn = { border: '1px solid var(--line-2)', background: 'var(--panel)', color: 'var(--ink)',
+    width: 28, height: 28, borderRadius: 7, cursor: 'pointer', fontSize: 15, fontWeight: 600,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 };
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <button type="button" onClick={() => onChange(Math.max(2, count - 1))} style={btn}>−</button>
+      <span className="num" style={{ width: 20, textAlign: 'center', fontSize: 14.5, fontWeight: 700, color: 'var(--ink)' }}>{count}</span>
+      <button type="button" onClick={() => onChange(Math.min(30, count + 1))} style={btn}>+</button>
+      <span style={{ fontSize: 12, color: 'var(--muted)' }}>properties</span>
+    </div>);
+
+}
+
+const propInputSty = { border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+  fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' };
+const propFocus = (e) => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)'; };
+const propBlur = (e) => { e.target.style.borderColor = 'var(--line-2)'; e.target.style.boxShadow = 'none'; };
+
+/* ── Portfolio: one section per property, generated from the property count ── */
+function PropertySection({ property, index, onChange, onRemove, canRemove }) {
+  const upd = (k, v) => onChange({ ...property, [k]: v });
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)',
+      borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '13px 20px', borderBottom: '1px solid var(--line)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+          <span className="num" style={{ width: 24, height: 24, borderRadius: 7, background: 'var(--navy)', color: '#fff',
+            flex: 'none', fontSize: 11.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{index + 1}</span>
+          <input value={property.name || ''} onChange={(e) => upd('name', e.target.value)}
+            placeholder={'Property ' + (index + 1)}
+            style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 14.5, fontWeight: 600,
+              color: 'var(--ink)', fontFamily: 'var(--font)', padding: '4px 6px', borderRadius: 6, flex: 1, minWidth: 0 }}
+            onFocus={(e) => { e.target.style.background = 'var(--panel-2)'; }}
+            onBlur={(e) => { e.target.style.background = 'transparent'; }} />
+        </div>
+        {canRemove &&
+        <button type="button" onClick={onRemove} title="Remove property"
+          style={{ border: 'none', background: 'none', color: 'var(--faint)', cursor: 'pointer', padding: 4, flex: 'none' }}>
+            <Icon name="close" size={14} />
+          </button>
+        }
+      </div>
+      <div style={{ padding: '16px 20px 20px', display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '18px 20px' }}>
+        <EField label="Market">
+          <input value={property.market || ''} onChange={(e) => upd('market', e.target.value)} placeholder="City, State"
+            style={propInputSty} onFocus={propFocus} onBlur={propBlur} />
+        </EField>
+        <EField label="Units"><FieldInput value={property.units} onChange={(v) => upd('units', v || 0)} align="left" /></EField>
+        <EField label="Vintage">
+          <input value={property.vintage || ''} onChange={(e) => upd('vintage', e.target.value)} placeholder="Year built"
+            style={propInputSty} onFocus={propFocus} onBlur={propBlur} />
+        </EField>
+        <EField label="Ask Price"><FieldInput value={property.askPrice} onChange={(v) => upd('askPrice', v || 0)} prefix="$" /></EField>
+        <EField label="UW Price"><FieldInput value={property.purchasePrice} onChange={(v) => upd('purchasePrice', v || 0)} prefix="$" /></EField>
+        <EField label="Notes">
+          <input value={property.notes || ''} onChange={(e) => upd('notes', e.target.value)} placeholder="Property-specific notes"
+            style={propInputSty} onFocus={propFocus} onBlur={propBlur} />
+        </EField>
+      </div>
+    </div>);
+
+}
+
 /* numbered stage stepper */
 function StageStepper({ stage, onChange }) {
   const idx = STAGES.indexOf(stage);
@@ -371,11 +437,12 @@ function StageStepper({ stage, onChange }) {
 
 /* full-bleed 5-up KPI strip + optional returns row */
 function KpiStrip({ deal, m }) {
-  // Full UW takes precedence when its income section is filled: going-in cap = Year 1
-  // yield-on-cost, stabilized cap = Year 3 YOC (stabilization year). Otherwise the
-  // Quick UW cap-rate math (computeMetrics) drives both. Asterisk notes the source.
-  const fullUW = window.hasUWInputs ? window.hasUWInputs(deal) : false;
-  const uw = fullUW && window.computeUW ? window.computeUW(deal) : null;
+  const isPortfolio = !!deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1;
+  // Portfolios: sum per-property Full UW into the combined model (each property is
+  // underwritten independently). Single deals: Full UW (Yr1/Yr3 YOC) over Quick UW fallback.
+  const combined = isPortfolio && window.computeCombinedUW ? window.computeCombinedUW(deal) : null;
+  const fullUW = isPortfolio ? !!combined : (window.hasUWInputs ? window.hasUWInputs(deal) : false);
+  const uw = isPortfolio ? combined : (fullUW && window.computeUW ? window.computeUW(deal) : null);
   const y1 = uw && uw.rows[1] ? uw.rows[1].yieldOnCost : null;
   const y3row = uw ? (uw.rows[3] || uw.rows[uw.rows.length - 1]) : null;
   const y3 = y3row ? y3row.yieldOnCost : null;
@@ -384,14 +451,18 @@ function KpiStrip({ deal, m }) {
   const stab = uw && y3 != null ? y3 : m.stabilizedCap;
   const capSrc = uw ? 'Full UW' : 'Quick UW';
 
+  const askSum = isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.askPrice) || 0), 0) : deal.askPrice;
+  const uwSum = isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0) : deal.purchasePrice;
+  const totalBasis = isPortfolio && uw ? uw.basis : m.totalBasis;
+
   const priceCells = [
-  { label: 'Ask Price', value: deal.askPrice ? fmtShort(deal.askPrice) : '—' },
-  { label: 'UW Price', value: deal.purchasePrice ? fmtShort(deal.purchasePrice) : '—' },
+  { label: 'Ask Price', value: askSum ? fmtShort(askSum) : '—' },
+  { label: 'UW Price', value: uwSum ? fmtShort(uwSum) : '—' },
   { label: 'Going-In Cap*', value: fmtPct(goingIn), color: goingIn ? 'var(--accent)' : 'var(--faint)',
     sub: (uw ? 'Yr 1 YOC · ' : '') + capSrc + '*' },
   { label: 'Stabilized Cap*', value: fmtPct(stab), color: stab ? 'var(--pos)' : 'var(--faint)',
     sub: (uw ? 'Yr 3 YOC · ' : '') + capSrc + '*' },
-  { label: 'Total Basis', value: fmtShort(m.totalBasis), color: m.totalBasis ? 'var(--ink)' : 'var(--faint)' }];
+  { label: 'Total Basis', value: fmtShort(totalBasis), color: totalBasis ? 'var(--ink)' : 'var(--faint)' }];
 
   // Returns only render once the Income & Economic Vacancy section is populated.
   const retCells = uw ? [
@@ -419,9 +490,10 @@ function KpiStrip({ deal, m }) {
 }
 
 /* tab bar */
-function DetailTabs({ tab, setTab }) {
+function DetailTabs({ tab, setTab, showProperties }) {
   const tabs = [
   { key: 'summary', label: 'Summary', icon: 'deal' },
+  ...(showProperties ? [{ key: 'properties', label: 'Properties', icon: 'bank' }] : []),
   { key: 'quickuw', label: 'Quick UW', icon: 'target' },
   { key: 'fulluw', label: 'Full UW', icon: 'calc' },
   { key: 'returns', label: 'Returns', icon: 'chart' },
@@ -658,6 +730,24 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
     return () => obs.disconnect();
   }, []);
   const set = (k, v) => onPatch(deal.id, { [k]: v });
+  const patch = (obj) => onPatch(deal.id, obj);
+  const makeProperty = (i) => ({ id: 'p' + Date.now() + '_' + i, name: 'Property ' + (i + 1),
+    market: deal.market || '', units: '', vintage: '', askPrice: '', purchasePrice: '', notes: '' });
+  const setPropertyCount = (n) => {
+    const cur = Array.isArray(deal.properties) ? deal.properties : [];
+    const next = cur.slice(0, n);
+    while (next.length < n) next.push(makeProperty(next.length));
+    set('properties', next);
+  };
+  const togglePortfolio = (on) => {
+    if (on) {
+      const cur = Array.isArray(deal.properties) ? deal.properties : [];
+      patch({ isPortfolio: true, properties: cur.length >= 2 ? cur : [makeProperty(0), makeProperty(1)] });
+    } else {
+      set('isPortfolio', false);
+    }
+  };
+  const properties = Array.isArray(deal.properties) ? deal.properties : [];
   const UploadBtn = window.OMBtn;
   const T12Banner = window.T12ParsedSection;
   const RRBanner = window.RentRollParsedSection;
@@ -736,6 +826,14 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                 color: (STAGE_META[deal.stage] || STAGE_META['New Deal']).c, cursor: 'pointer' }}>
                 {STAGE_ALL.map((s) => <option key={s} value={s}>{STAGE_META[s].label}</option>)}
               </select>
+              <span style={{ width: 1, height: 18, background: 'var(--line)', flex: 'none' }} />
+              {/* Analyst Screener (placeholder — not wired up yet) */}
+              <button type="button" onClick={() => {}} title="Analyst Screener — coming soon"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--line-2)',
+                  background: 'var(--panel)', color: 'var(--slate)', borderRadius: 7, padding: '6px 10px',
+                  fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font)' }}>
+                <Icon name="search" size={13} /> Analyst Screener
+              </button>
             </div>
           </div>
 
@@ -788,7 +886,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
         <KpiStrip deal={deal} m={m} />
 
         {/* tabs */}
-        <DetailTabs tab={tab} setTab={setTab} />
+        <DetailTabs tab={tab} setTab={setTab} showProperties={!!deal.isPortfolio} />
       </div>
 
       {/* ===== Body ===== */}
@@ -881,6 +979,17 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                   }
                   </EField>
                   <EField label="Units"><FieldInput value={deal.units} onChange={(v) => set('units', v || 0)} align="left" /></EField>
+                  <EField label="Portfolio">
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: 'var(--ink)', height: 34 }}>
+                      <input type="checkbox" checked={!!deal.isPortfolio} onChange={(e) => togglePortfolio(e.target.checked)} style={{ width: 15, height: 15, cursor: 'pointer' }} />
+                      Multiple properties
+                    </label>
+                  </EField>
+                  {deal.isPortfolio &&
+                  <EField label="Number of Properties">
+                    <PropertyCountStepper count={properties.length || 2} onChange={setPropertyCount} />
+                  </EField>
+                  }
                 </div>
               </PanelCard>
 
@@ -947,6 +1056,25 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                 <RailRow label="Market" value={deal.market || '—'} num={false} />
               </RailCard>
             </div>
+          </div>
+        }
+
+        {/* ===== PROPERTIES (portfolio) ===== */}
+        {tab === 'properties' &&
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                <span className="num" style={{ fontWeight: 700, color: 'var(--ink)' }}>{properties.length}</span> properties ·{' '}
+                <span className="num" style={{ fontWeight: 700, color: 'var(--ink)' }}>{fmtNum(properties.reduce((s, p) => s + (Number(p.units) || 0), 0))}</span> total units
+              </div>
+              <PropertyCountStepper count={properties.length || 2} onChange={setPropertyCount} />
+            </div>
+            {properties.map((p, i) =>
+            <PropertySection key={p.id || i} property={p} index={i}
+            onChange={(next) => { const arr = [...properties]; arr[i] = next; set('properties', arr); }}
+            onRemove={() => setPropertyCount(properties.length - 1)}
+            canRemove={properties.length > 2} />
+            )}
           </div>
         }
 

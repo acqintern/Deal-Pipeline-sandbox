@@ -380,5 +380,60 @@
     return { goingIn: m.goingInCap, stab: m.stabilizedCap, source: 'Quick UW' };
   }
 
-  Object.assign(window, { computeUW, computeLP, computeScenario, inPlaceVacPct, hasUWInputs, displayCaps, irr, makeLoan, balanceAfter, pmt });
+  // ---- Portfolio combine: sum per-property UW models into one aggregate model ----
+  // Each property is underwritten independently (own income/opex/financing/refi/assumptions);
+  // this sums their year rows and re-derives portfolio-level IRR/equity multiple from the
+  // combined cash-flow stream (summed property-by-property, not an average of IRRs).
+  function computeCombinedUW(deal) {
+    const props = (Array.isArray(deal.properties) ? deal.properties : []).filter((p) => hasUWInputs(p));
+    if (!props.length) return null;
+    const uws = props.map((p) => computeUW(p));
+    const hold = Math.max(...uws.map((u) => u.hold));
+    const rows = [];
+    const sumField = (y, f) => uws.reduce((s, u) => s + ((u.rows[y] && u.rows[y][f]) || 0), 0);
+    for (let y = 0; y <= hold; y++) {
+      const noi = sumField(y, 'noi'), ds = sumField(y, 'ds');
+      const basisY = uws.reduce((s, u) => s + (y <= u.hold ? u.basis : 0), 0);
+      const eqBal = uws.reduce((s, u) => s + (u.rows[y] ? u.rows[y].equityBalance : 0), 0);
+      const netIncome = sumField(y, 'netIncome');
+      rows.push({
+        year: y,
+        gpr: sumField(y, 'gpr'), egi: sumField(y, 'egi'), opex: sumField(y, 'opex'),
+        noi, ds, amFee: sumField(y, 'amFee'), netIncome,
+        loanBalance: sumField(y, 'loanBalance'),
+        refiDistribution: sumField(y, 'refiDistribution'), saleProceeds: sumField(y, 'saleProceeds'),
+        totalCashFlow: sumField(y, 'totalCashFlow'),
+        yieldOnCost: basisY > 0 ? noi / basisY : 0,
+        dscr: ds > 0 ? noi / ds : null,
+        cashOnCash: eqBal > 0 ? netIncome / eqBal : null,
+        equityBalance: eqBal,
+        netRevGrowth: y === 0 ? null : (rows[y - 1].egi > 0 ? sumField(y, 'egi') / rows[y - 1].egi - 1 : null),
+        principalPaydown: sumField(y, 'principalPaydown'),
+        principalPaydownPct: eqBal > 0 ? sumField(y, 'principalPaydown') / eqBal : null,
+      });
+      rows[y].yieldPlusPaydown = (rows[y].cashOnCash || 0) + (rows[y].principalPaydownPct || 0);
+    }
+    const initialEquity = uws.reduce((s, u) => s + u.initialEquity, 0);
+    const basis = uws.reduce((s, u) => s + u.basis, 0);
+    const salePrice = uws.reduce((s, u) => s + (u.hold === hold ? u.salePrice : 0), 0);
+    const netSaleProceeds = uws.reduce((s, u) => s + (u.hold === hold ? u.netSaleProceeds : 0), 0);
+    // combined IRR from the summed cash-flow stream across all properties (pad to common length)
+    const cfs = [];
+    for (let t = 0; t <= hold; t++) {
+      cfs.push(uws.reduce((s, u) => s + (u.cfs[t] || 0), 0));
+    }
+    const dealIRR = irr(cfs);
+    const totalDistributions = cfs.slice(1).reduce((s, c) => s + c, 0);
+    const equityMultiple = initialEquity > 0 ? totalDistributions / initialEquity : null;
+    let cocSum = 0, cocN = 0;
+    for (let y = 1; y <= hold; y++) { if (rows[y].cashOnCash != null) { cocSum += rows[y].cashOnCash; cocN++; } }
+    const avgYield = cocN ? cocSum / cocN : null;
+    return {
+      units: uws.reduce((s, u) => s + u.units, 0), basis, hold, rows, initialEquity,
+      salePrice, netSaleProceeds, cfs, irr: dealIRR, equityMultiple, totalDistributions, avgYield,
+      propertyCount: props.length, refiOn: uws.some((u) => u.refiOn),
+    };
+  }
+
+  Object.assign(window, { computeUW, computeLP, computeScenario, computeCombinedUW, inPlaceVacPct, hasUWInputs, displayCaps, irr, makeLoan, balanceAfter, pmt });
 })();
