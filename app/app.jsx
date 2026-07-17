@@ -234,9 +234,9 @@ function DealCard({ d, onOpen, omMap, t12Map, rrMap, onOM, onT12, onRR, onPatch 
       {/* Name + type */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
+          <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3 }}>{d.name}</div>
           {onPatch && <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} />}
           {onPatch && <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} />}
-          <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3 }}>{d.name}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 'none' }}>
           {d.offMarket && <OffMarketTag size="sm" />}
@@ -346,9 +346,9 @@ function BoardCard({ d, onOpen, onDragStart, onPatch }) {
     onMouseEnter={(e) => {e.currentTarget.style.boxShadow = '0 4px 16px rgba(16,30,50,.11)';e.currentTarget.style.transform = 'translateY(-1px)';}}
     onMouseLeave={(e) => {e.currentTarget.style.boxShadow = 'var(--shadow)';e.currentTarget.style.transform = 'none';}}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-        {onPatch && <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} size={13} />}
-        {onPatch && <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} size={13} />}
         <div className="clip" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{d.name}</div>
+        {onPatch && <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} size={17} />}
+        {onPatch && <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} size={17} />}
       </div>
       <div className="clip" style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 9, fontWeight: 400 }}>{d.market}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -472,7 +472,7 @@ function GroupedTable({ deals, onOpen, onPatch, omMap, t12Map, rrMap, onOM, onT1
                   {/* Deal name */}
                   <div style={{ padding:'8px 6px', display:'flex', alignItems:'center', gap:8, minWidth:0 }} onClick={e=>e.stopPropagation()}>
                     <span className="clip" style={{ fontSize:13.5, fontWeight:600, color:'var(--ink)' }}>{d.name}</span>
-                    <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch && onPatch(d.id, { offMarket: !d.offMarket })} size={12} />
+                    <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch && onPatch(d.id, { offMarket: !d.offMarket })} size={16} />
                   </div>
                   {/* Type */}
                   <div style={{ padding:'8px 6px' }}><TypeTag type={d.type}/></div>
@@ -873,12 +873,11 @@ function PipelineTable({ deals, onOpen, onPatch, onBulkPatch, onBulkDelete, onRe
               {/* Deal / Asset — frozen pane */}
               <div style={{ padding: '8px 7px', display: 'flex', alignItems: 'center', gap: 11, minWidth: 0,
                 position: 'sticky', left: nameLeft, zIndex: 2, background: isSel ? 'var(--accent-soft)' : 'var(--panel)' }}>
-                <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} size={14} />
-                  <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} size={13} />
-                </div>
                 <div style={{ minWidth: 0 }}>
-                  <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25 }}>{d.name}</div>
+                  <div className="clip" style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25, display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {d.name}
+                    <StarToggle on={!!d.starred} onToggle={() => onPatch(d.id, { starred: !d.starred })} size={18} />
+                  </div>
                   <div className="clip" style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>
                     {[d.type, d.units ? fmtNum(d.units) + ' units' : d.vintage ? 'Built ' + d.vintage : null].filter(Boolean).join(' · ')}
                   </div>
@@ -899,8 +898,9 @@ function PipelineTable({ deals, onOpen, onPatch, onBulkPatch, onBulkDelete, onRe
               </div>
 
               {/* Assignee */}
-              <div style={{ padding: '8px 7px', display: 'flex', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ padding: '8px 7px', display: 'flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
                 <AssigneePicker value={d.assignees} onChange={(v) => onPatch(d.id, { assignees: v })} size={22} />
+                <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch(d.id, { offMarket: !d.offMarket })} size={17} />
               </div>
 
               {/* Ask */}
@@ -1415,7 +1415,6 @@ function SubmarketTable({ deals, onOpen, onPatch, omMap, t12Map, rrMap, onOM, on
                       <div style={{ padding:'8px 6px', minWidth:0 }}>
                         <div style={{ display:'flex', alignItems:'center', gap:6, minWidth:0 }} onClick={e=>e.stopPropagation()}>
                           <span className="clip" style={{ fontSize:13.5, fontWeight:600, color:'var(--ink)', display:'block' }}>{d.name}</span>
-                          <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch && onPatch(d.id, { offMarket: !d.offMarket })} size={12} />
                         </div>
                         {d.broker && <span className="clip" style={{ fontSize:11, color:'var(--muted)', display:'block', marginTop:1 }}>{getBrokerFirm(d.broker)}</span>}
                       </div>
@@ -1430,8 +1429,9 @@ function SubmarketTable({ deals, onOpen, onPatch, omMap, t12Map, rrMap, onOM, on
                         color:caps.stab>0.001?'var(--pos)':'var(--faint)', textAlign:'right' }}>
                         {caps.stab>0.001?fmtPct(caps.stab,1):'—'}
                       </div>
-                      <div style={{ padding:'8px 6px' }} onClick={e=>e.stopPropagation()}>
+                      <div style={{ padding:'8px 6px', display:'flex', alignItems:'center', gap:4 }} onClick={e=>e.stopPropagation()}>
                         <AssigneePicker value={d.assignees} onChange={v=>onPatch(d.id,{assignees:v})} size={22}/>
+                        <OffMarketToggle on={!!d.offMarket} onToggle={() => onPatch && onPatch(d.id, { offMarket: !d.offMarket })} size={16} />
                       </div>
                       <div style={{ padding:'8px 6px', display:'flex', gap:5, justifyContent:'center', flexWrap:'wrap' }} onClick={e=>e.stopPropagation()}>
                         <DocBar dealId={d.id} omMap={omMap} t12Map={t12Map} rrMap={rrMap} onOM={onOM} onT12={onT12} onRR={onRR} onOpenDeal={onOpen}/>
@@ -1603,6 +1603,8 @@ function PipelineView({ deals, allDeals, onOpen, onPatch, onAdd, onImport, onOM,
         : mode === 'table'
           ? <PipelineTable deals={filtered} onOpen={onOpen} onPatch={onPatch} onBulkPatch={onBulkPatch} onBulkDelete={onBulkDelete} onReorder={onReorder} omMap={omMap} t12Map={t12Map} rrMap={rrMap} onOM={onOM} onT12={onT12} onRR={onRR} sortKey={sortKey} sortDir={sortDir} onSortKeyChange={onSortKeyChange} onSortDirChange={onSortDirChange}/>
           : <GroupedCards deals={filtered} onOpen={onOpen} onPatch={onPatch} omMap={omMap} t12Map={t12Map} rrMap={rrMap} onOM={onOM} onT12={onT12} onRR={onRR}/>}
+
+      <StashWidget deals={allDeals} onOpen={onOpen} onPatch={onPatch} />
 
       {adding && <AddDealModal onClose={() => setAdding(false)} onAdd={onAdd} />}
     </div>);
@@ -1786,6 +1788,7 @@ function LOIStatusView({ deals, onOpen, onPatch }) {
 // Normalize any legacy stage names onto the current set whenever deals enter state.
 const migrateDeals = (arr) => Array.isArray(arr)
   ? arr.map((d) => {
+      if (d.bucket === 'Stash' && d.stage !== 'Stash') d = { ...d, stage: 'Stash' };
       const ns = window.normalizeStage(d.stage);
       let r = ns === d.stage ? d : { ...d, stage: ns };
       // Migrate legacy analyst string → assignees array so AssigneePicker shows it
@@ -1800,7 +1803,7 @@ const NAV = [
 { key: 'pipeline', label: 'Pipeline', icon: 'board' },
 { key: 'loi', label: 'LOI Status', icon: 'flag' },
 { key: 'metrics', label: 'Metrics', icon: 'pulse' },
-{ key: 'analytics', label: 'Analytics', icon: 'chart' },
+{ key: 'brokercalls', label: 'Broker Calls', icon: 'note' },
 { key: 'tasks', label: 'Tasks', icon: 'check' },
 { key: 'crm', label: 'CRM', icon: 'deal' },
 { key: 'dead', label: 'Dead Deals', icon: 'close' }];
@@ -3008,7 +3011,7 @@ ${text}`;
         zebra={t.zebra} /> :
         view === 'loi' ? <LOIStatusView deals={loiDeals} onOpen={open} onPatch={patch} /> :
         view === 'metrics' ? <MetricsView deals={liveDeals} onOpen={open} /> :
-        view === 'analytics' ? <AnalyticsView deals={liveDeals} onOpen={open} /> :
+        view === 'brokercalls' ? <BrokerCallsView deals={liveDeals} onOpen={open} /> :
         view === 'dead' ? <DeadDealsView deals={deadDeals} onOpen={open} onPatch={patch}
         onBulkPatch={bulkPatch} onBulkDelete={bulkDelete} onReorder={reorderVisible}
         onOM={handleOMUpload} onT12={handleT12Upload} onRR={handleRentRollUpload}

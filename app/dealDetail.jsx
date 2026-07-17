@@ -294,6 +294,154 @@ function DField({ label, children }) {
     </div>);
 
 }
+/* ── Broker Call Log — quick call notes with a broker autocomplete + timestamp, exportable for GHL ── */
+function BrokerCallLog({ deal, contacts, onPatch }) {
+  const log = Array.isArray(deal.callLog) ? deal.callLog : [];
+  const [name, setName] = useStateD('');
+  const [firm, setFirm] = useStateD('');
+  const [note, setNote] = useStateD('');
+  const [showSug, setShowSug] = useStateD(false);
+  const [editId, setEditId] = useStateD(null);
+  const [editDraft, setEditDraft] = useStateD(null);
+
+  const matches = name.trim().length > 0
+    ? (contacts || []).filter((c) => (c.name || '').toLowerCase().includes(name.toLowerCase())).slice(0, 5)
+    : [];
+
+  const pick = (c) => { setName(c.name); setFirm(c.firm || firm); setShowSug(false); };
+
+  const logCall = () => {
+    if (!name.trim() && !note.trim()) return;
+    const entry = { id: 'call_' + Date.now().toString(36), ts: new Date().toISOString(),
+      brokerName: name.trim(), brokerFirm: firm.trim(), note: note.trim() };
+    onPatch(deal.id, { callLog: [entry, ...log] });
+    setName(''); setFirm(''); setNote('');
+  };
+
+  const startEdit = (e) => { setEditId(e.id); setEditDraft({ brokerName: e.brokerName || '', brokerFirm: e.brokerFirm || '', note: e.note || '' }); };
+  const saveEdit = () => {
+    onPatch(deal.id, { callLog: log.map((e) => e.id === editId ? { ...e, ...editDraft } : e) });
+    setEditId(null); setEditDraft(null);
+  };
+  const cancelEdit = () => { setEditId(null); setEditDraft(null); };
+
+  const exportXLSX = () => {
+    if (!window.XLSX || !log.length) return;
+    const rows = log.map((e) => {
+      const parts = (e.brokerName || '').trim().split(/\s+/);
+      return {
+        'First Name': parts[0] || '',
+        'Last Name': parts.slice(1).join(' ') || '',
+        'Email': e.brokerEmail || '',
+        'Phone': e.brokerPhone || '',
+        'Company Name': e.brokerFirm || '',
+        'Property Name': deal.name,
+        'Notes': e.note || '',
+        'Call Date': e.ts ? fmtDate(e.ts) : '',
+      };
+    });
+    const ws = window.XLSX.utils.json_to_sheet(rows);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'Call Log');
+    window.XLSX.writeFile(wb, deal.name.replace(/[^a-z0-9]+/gi, '_') + '_call_log.xlsx');
+  };
+
+  const inputStyle = { width: '100%', boxSizing: 'border-box', border: '1px solid var(--line-2)', borderRadius: 7,
+    padding: '0 10px', height: 34, background: 'var(--panel)', fontSize: 13, color: 'var(--ink)', fontFamily: 'var(--font)', outline: 'none' };
+  const smallInputStyle = { ...inputStyle, height: 30, fontSize: 12.5 };
+
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)' }}>
+      <div style={{ padding: '16px 20px 0', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 11, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 11 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--ink)' }}>Broker Call Log</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>logged calls for {deal.name}</span>
+        </div>
+        <button onClick={exportXLSX} disabled={!log.length} title="Export as Excel for GoHighLevel import"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--line-2)', borderRadius: 7,
+            padding: '5px 10px', background: 'var(--panel)', fontSize: 12, fontWeight: 600,
+            color: log.length ? 'var(--slate)' : 'var(--faint)', cursor: log.length ? 'pointer' : 'default' }}>
+          <Icon name="download" size={12} /> Export for GHL
+        </button>
+      </div>
+      <div style={{ padding: '14px 20px 20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.6fr auto', gap: 8, marginBottom: 14 }}>
+          <div style={{ position: 'relative' }}>
+            <input value={name} placeholder="Broker name…"
+              onChange={(e) => { setName(e.target.value); setShowSug(true); }}
+              onFocus={() => setShowSug(true)}
+              onBlur={() => setTimeout(() => setShowSug(false), 120)}
+              style={inputStyle} />
+            {showSug && matches.length > 0 &&
+              <div style={{ position: 'absolute', top: 38, left: 0, right: 0, zIndex: 5, background: 'var(--panel)',
+                border: '1px solid var(--line-2)', borderRadius: 8, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+                {matches.map((c) => (
+                  <div key={c.id} onMouseDown={() => pick(c)}
+                    style={{ padding: '7px 10px', fontSize: 12.5, cursor: 'pointer', borderBottom: '1px solid var(--line)' }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--accent-soft)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                    <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{c.name}</div>
+                    <div style={{ color: 'var(--muted)', fontSize: 11 }}>{[c.firm, c.phone].filter(Boolean).join(' · ')}</div>
+                  </div>
+                ))}
+              </div>}
+          </div>
+          <input value={firm} placeholder="Brokerage / firm…" onChange={(e) => setFirm(e.target.value)} style={inputStyle} />
+          <input value={note} placeholder="What did they say? Pricing guidance, timeline, feedback…"
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') logCall(); }}
+            style={inputStyle} />
+          <button onClick={logCall} style={{ border: 'none', borderRadius: 7, background: 'var(--accent)', color: '#fff',
+            fontSize: 12.5, fontWeight: 600, padding: '0 14px', cursor: 'pointer' }}>Log Call</button>
+        </div>
+
+        {log.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--faint)', fontStyle: 'italic' }}>No calls logged yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {log.map((e, i) => (
+              <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '96px 1fr auto', gap: 12,
+                padding: '9px 0', borderTop: i > 0 ? '1px solid var(--line)' : 'none', alignItems: 'start' }}>
+                <div className="num" style={{ fontSize: 11, color: 'var(--muted)', paddingTop: 1 }}>
+                  {new Date(e.ts).toLocaleDateString([], { month: 'short', day: 'numeric' })}<br />{new Date(e.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+                {editId === e.id ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      <input value={editDraft.brokerName} placeholder="Broker name"
+                        onChange={(ev) => setEditDraft((d) => ({ ...d, brokerName: ev.target.value }))} style={smallInputStyle} />
+                      <input value={editDraft.brokerFirm} placeholder="Brokerage / firm"
+                        onChange={(ev) => setEditDraft((d) => ({ ...d, brokerFirm: ev.target.value }))} style={smallInputStyle} />
+                    </div>
+                    <input value={editDraft.note} placeholder="Note"
+                      onChange={(ev) => setEditDraft((d) => ({ ...d, note: ev.target.value }))} style={smallInputStyle} />
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)' }}>
+                      {e.brokerName || 'Unknown broker'}{e.brokerFirm ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}> — {e.brokerFirm}</span> : null}
+                    </div>
+                    {e.note && <div style={{ fontSize: 12.5, color: 'var(--slate)', marginTop: 2 }}>{e.note}</div>}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {editId === e.id ? (
+                    <React.Fragment>
+                      <button onClick={saveEdit} title="Save" style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', color: 'var(--pos)' }}><Icon name="check" size={14} /></button>
+                      <button onClick={cancelEdit} title="Cancel" style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', color: 'var(--faint)' }}><Icon name="close" size={14} /></button>
+                    </React.Fragment>
+                  ) : (
+                    <button onClick={() => startEdit(e)} title="Edit" style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', color: 'var(--faint)' }}><Icon name="edit" size={14} /></button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>);
+}
+
 /* labelled editable field (input lives in children) */
 function EField({ label, children }) {
   return (
@@ -1030,13 +1178,15 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                 <NotesEditor value={deal.notes} onChange={(v) => set('notes', v)} />
               </PanelCard>
 
+              <BrokerCallLog deal={deal} contacts={contacts} onPatch={onPatch} />
+
               {window.DocumentVault && <window.DocumentVault deal={deal} set={set} />}
             </div>
 
             {/* right rail */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               {window.ICMemoButton &&
-                <window.ICMemoButton deal={deal} onRunMemo={onRunMemo} />
+                <window.ICMemoButton deal={deal} onRunMemo={onRunMemo} onRunMarketReview={onRunMarketReview} />
               }
               <RailCard icon="target" title="Key Metrics">
                 <RailRow label="Ask Price" value={deal.askPrice ? fmtShort(deal.askPrice) : '—'} muted={!deal.askPrice} />

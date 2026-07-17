@@ -266,80 +266,36 @@ function ScenarioAnalysis({ deal, uw }) {
   );
 }
 
-// ─── Return decomposition (pie) ────────────────────────────────────────────────
-function ReturnDecomp({ uw }) {
-  if (!uw||!uw.totalDistributions) return null;
-  const exit = uw.netSaleProceeds||0;
-  const opCF = Math.max(0,(uw.totalDistributions||0)-exit);
-  const total = opCF+exit; if (!total) return null;
-  const opP = opCF/total, exP = 1-opP;
-  const r=34, stroke=11, cx=46, cy=46, size=92;
-  const circ = 2*Math.PI*r, opDash = opP*circ;
-  return (
-    <div style={{ display:'flex', gap:9, alignItems:'center', padding:'5px 11px 7px' }}>
-      <div style={{ flexShrink:0 }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          <circle cx={cx} cy={cy} r={r} fill="none" stroke={IC.navy} strokeWidth={stroke}
-            strokeDasharray={`${opDash} ${circ}`} strokeDashoffset={0}
-            transform={`rotate(-90 ${cx} ${cy})`} />
-          <circle cx={cx} cy={cy} r={r} fill="none" stroke={IC.blue} strokeWidth={stroke}
-            strokeDasharray={`${circ-opDash} ${circ}`} strokeDashoffset={-opDash}
-            transform={`rotate(-90 ${cx} ${cy})`} />
-          <text x={cx} y={cy-4} textAnchor="middle" fontSize="6.5" fontWeight="700"
-            fill={IC.faint} fontFamily={IC.sans} letterSpacing=".06em">TOTAL</text>
-          <text x={cx} y={cy+9} textAnchor="middle" fontSize="11.5" fontWeight="700"
-            fill={IC.navy} fontFamily={IC.sans}>{_ms(total)}</text>
-        </svg>
-      </div>
-      <div style={{ flex:1 }}>
-        {[['Operating Cash Flows', opCF, opP, IC.navy], ['Exit Proceeds', exit, exP, IC.blue]].map(([label,amt,pct,col]) => (
-          <div key={label} style={{ display:'flex', alignItems:'center', gap:6,
-            padding:'2px 0', borderBottom:'1px solid '+IC.line2 }}>
-            <div style={{ width:8, height:8, borderRadius:'50%', background:col, flexShrink:0 }}/>
-            <span style={{ fontSize:10, color:IC.muted, flex:1 }}>{label}</span>
-            <span style={{ fontSize:11, fontWeight:600, color:IC.navy, fontVariantNumeric:'tabular-nums' }}>
-              {_ms(amt)}<span style={{ fontSize:9, color:IC.faint, marginLeft:3 }}>({_p(pct,0)})</span>
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Return summary (no DSCR — that lives with Capital Structure) ─────────────
-function ReturnSummaryPanel({ uw, lp }) {
+// ─── Return summary — Deal / LP / GP returns, incl. cash-flow split ────────────
+function ReturnSummaryPanel({ uw, lp, caps }) {
   if (!uw) return (
     <div style={{ padding:'8px 11px', fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>
   );
-  const irrColor = uw.irr!=null?(uw.irr>=.18?IC.pos:uw.irr<.12?IC.neg:IC.warn):IC.faint;
-  const emColor  = uw.equityMultiple!=null?(uw.equityMultiple>=2?IC.pos:uw.equityMultiple<1.5?IC.neg:IC.warn):IC.faint;
+  const irrColor   = uw.irr!=null?(uw.irr>=.18?IC.pos:uw.irr<.12?IC.neg:IC.warn):IC.faint;
+  const lpIrrColor = lp&&lp.lpIRR!=null?(lp.lpIRR>=.15?IC.pos:lp.lpIRR<.1?IC.neg:IC.warn):IC.faint;
+  const lpProfit = lp ? (lp.lpDistTotal-lp.LPcap) : null;
   const rows = [
-    ['Deal IRR', _p(uw.irr), true],
-    ['Avg Deal Yield', _p(uw.avgYield)],
-    ['Equity Multiple', _x(uw.equityMultiple)],
-    ['Total Profit', _ms(uw.profit)],
-    ['Exit Cap Rate', _r(uw.exitCap*100), false, true],
-    ['Hold Period', uw.hold+' Years'],
+    ['Deal IRR', _p(uw.irr), true, false, irrColor],
+    ['LP IRR', lp?_p(lp.lpIRR):'—', true, false, lpIrrColor],
+    ['Deal Equity Multiple', _x(uw.equityMultiple), false, true],
+    ['LP Equity Multiple', lp?_x(lp.lpMultiple):'—'],
+    ['Deal Avg Yield', _p(uw.avgYield), false, true],
+    ['LP Avg Yield', lp?_p(lp.avgLpYield):'—'],
+    ['GP Total Profit', lp?_ms(lp.gpPromote):'—', false, true],
+    ['LP Total Profit', lp?_ms(lpProfit):'—'],
+    ['Total Profit', _ms(uw.profit), true, true],
+    ['Going-In Cap', _p(caps.goingIn), false, true],
+    ['Stabilized Cap (Yr '+(uw.stabYear||3)+')', _p(caps.stab)],
   ];
-  if (lp) rows.push(
-    ['LP IRR', _p(lp.lpIRR), false, true],
-    ['Avg LP Yield', _p(lp.avgLpYield)],
-    ['LP Equity Multiple', _x(lp.lpMultiple)],
-    ['Total GP Promote', _ms(lp.gpPromote)],
-  );
-  return rows.map(([lbl,val,strong,sep],i) => {
-    const color = lbl==='Deal IRR' ? irrColor : lbl==='Equity Multiple' ? emColor : undefined;
-    return (
-      <div key={lbl} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-        padding:'2px 11px', borderBottom:'1px solid '+IC.line2,
-        borderTop: sep ? '1px solid '+IC.line : 'none' }}>
-        <span style={{ fontSize:11, color:IC.muted }}>{lbl}</span>
-        <span style={{ fontSize:11, fontWeight:strong?700:500, color:color||IC.navy,
-          fontVariantNumeric:'tabular-nums' }}>{val}</span>
-      </div>
-    );
-  });
+  return rows.map(([lbl,val,strong,sep,color],i) => (
+    <div key={lbl} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+      padding:'2px 11px', borderBottom:'1px solid '+IC.line2,
+      borderTop: sep ? '1px solid '+IC.line : 'none' }}>
+      <span style={{ fontSize:11, color:IC.muted }}>{lbl}</span>
+      <span style={{ fontSize:11, fontWeight:strong?700:500, color:color||IC.navy,
+        fontVariantNumeric:'tabular-nums' }}>{val}</span>
+    </div>
+  ));
 }
 
 // ─── Underwriting assumptions ─────────────────────────────────────────────────
@@ -366,25 +322,27 @@ function UWAssumptions({ uw }) {
   );
 }
 
-// ─── Operating forecast ───────────────────────────────────────────────────────
+// ─── Operating forecast — Current + Y1..Y5, consistent color system ───────────
 function OperatingForecast({ uw }) {
   if (!uw||!uw.rows) return null;
   const maxY = Math.min(uw.hold, 5);
-  const years = [];
+  const curNOI = uw.egi0 - ((uw.rows[1]&&uw.rows[1].opex!=null)?uw.rows[1].opex:uw.opexBase);
+  const cols = [{ label:'Current', noi:curNOI, netIncome:uw.rows[0].netIncome, cashOnCash:uw.rows[0].cashOnCash,
+    yieldOnCost:uw.basis>0?curNOI/uw.basis:null, dscr:uw.rows[0].dscr, vac:uw.inPlaceEconVac, stab:false, isCur:true }];
   for (let y=1; y<=maxY; y++) {
     const row=uw.rows[y]; if(!row) continue;
-    years.push({ y, noi:row.noi, netIncome:row.netIncome, cashOnCash:row.cashOnCash, yieldOnCost:row.yieldOnCost,
-      econ:1-(uw.econVacForYear?uw.econVacForYear(y):uw.stabVac),
-      stab:y>=uw.stabYear });
+    cols.push({ label:'Y'+y, noi:row.noi, netIncome:row.netIncome, cashOnCash:row.cashOnCash, yieldOnCost:row.yieldOnCost,
+      dscr:row.dscr, vac:uw.econVacForYear?uw.econVacForYear(y):uw.stabVac, stab:y>=uw.stabYear });
   }
-  if (!years.length) return null;
+  if (cols.length<2) return null;
   const METRICS = [
-    { label:'Econ. Occupancy', fmt:(r)=>r.econ!=null?_p(r.econ,0):'—',            color:()=>IC.navy2 },
-    { label:'NOI ($M)',        fmt:(r)=>r.noi!=null?('$'+(r.noi/1e6).toFixed(2)+'M'):'—', color:(r)=>r.stab?IC.pos:IC.navy, bold:true },
-    { label:'YOY Growth',      fmt:(r,i)=>{ if(i===0||!years[i-1]||!years[i-1].noi) return '—'; return _p((r.noi-years[i-1].noi)/years[i-1].noi,1); }, color:()=>IC.pos },
-    { label:'Net Income',      fmt:(r)=>r.netIncome!=null?('$'+(r.netIncome/1e6).toFixed(2)+'M'):'—', color:()=>IC.navy2 },
-    { label:'Total Yield',     fmt:(r)=>r.cashOnCash!=null?_p(r.cashOnCash,1):'—', color:()=>IC.blue, bold:true },
-    { label:'Yield on Cost',   fmt:(r)=>r.yieldOnCost!=null?_p(r.yieldOnCost,1):'—', color:()=>IC.navy },
+    { label:'Economic Vacancy', fmt:(r)=>r.vac!=null?_p(r.vac,1):'—' },
+    { label:'NOI ($M)',         fmt:(r)=>r.noi!=null?('$'+(r.noi/1e6).toFixed(2)+'M'):'—', bold:true },
+    { label:'YOY Growth',       fmt:(r,i)=>{ if(i===0||!cols[i-1]||!cols[i-1].noi) return '—'; return _p((r.noi-cols[i-1].noi)/cols[i-1].noi,1); } },
+    { label:'Net Income',       fmt:(r)=>r.netIncome!=null?('$'+(r.netIncome/1e6).toFixed(2)+'M'):'—' },
+    { label:'DSCR',             fmt:(r)=>r.dscr!=null?_n(r.dscr)+'x':'—', bold:true },
+    { label:'Total Yield',      fmt:(r)=>r.cashOnCash!=null?_p(r.cashOnCash,1):'—', bold:true },
+    { label:'Yield on Cost',    fmt:(r)=>r.yieldOnCost!=null?_p(r.yieldOnCost,1):'—' },
   ];
   return (
     <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
@@ -393,10 +351,10 @@ function OperatingForecast({ uw }) {
           <th style={{ textAlign:'left', fontSize:8.5, fontWeight:700, letterSpacing:'.07em',
             textTransform:'uppercase', color:IC.faint, padding:'3px 7px 3px 0',
             borderBottom:'1.5px solid '+IC.line }}>Year</th>
-          {years.map(r => (
-            <th key={r.y} style={{ textAlign:'right', fontSize:9.5, fontWeight:700,
-              color:r.stab?IC.pos:IC.navy, padding:'3px 7px',
-              borderBottom:'1.5px solid '+IC.line, fontVariantNumeric:'tabular-nums' }}>Y{r.y}</th>
+          {cols.map(r => (
+            <th key={r.label} style={{ textAlign:'right', fontSize:9.5, fontWeight:700,
+              color:r.stab?IC.pos:r.isCur?IC.muted:IC.navy, padding:'3px 7px',
+              borderBottom:'1.5px solid '+IC.line, fontVariantNumeric:'tabular-nums' }}>{r.label}</th>
           ))}
         </tr>
       </thead>
@@ -405,11 +363,11 @@ function OperatingForecast({ uw }) {
           <tr key={m.label}>
             <td style={{ fontSize:8.5, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase',
               color:IC.muted, padding:'4px 7px 4px 0', borderBottom:'1px solid '+IC.line2 }}>{m.label}</td>
-            {years.map((r,i) => (
-              <td key={r.y} style={{ textAlign:'right', fontVariantNumeric:'tabular-nums',
+            {cols.map((r,i) => (
+              <td key={r.label} style={{ textAlign:'right', fontVariantNumeric:'tabular-nums',
                 padding:'4px 7px', borderBottom:'1px solid '+IC.line2,
                 fontSize:m.bold?12:11, fontWeight:m.bold?700:500,
-                color:m.color(r) }}>
+                color:r.stab?IC.pos:IC.navy }}>
                 {m.fmt(r,i)}
               </td>
             ))}
@@ -421,6 +379,108 @@ function OperatingForecast({ uw }) {
 }
 
 // ─── Bullet ───────────────────────────────────────────────────────────────────
+function ICMemoPage2({ deal, mr }) {
+  const sent  = mr.residentSentiment || {};
+  const crime = mr.crimeSnapshot || {};
+  const econ  = mr.economicDrivers || {};
+  const sub   = mr.submarketContext || {};
+  const panel = { background:IC.panel, border:'1px solid '+IC.line, borderRadius:5, overflow:'hidden' };
+  const gradeColor = (sub.overallGrade||'').startsWith('A')?IC.pos:(sub.overallGrade||'').startsWith('B')?IC.blue:(sub.overallGrade||'').startsWith('C')?IC.warn:IC.faint;
+
+  return (
+    <div id="ic-memo-page2" style={{ width:1020, background:IC.bg, color:IC.navy,
+      fontFamily:IC.sans, WebkitFontSmoothing:'antialiased' }}>
+      <div style={{ background:IC.navy, padding:'7px 18px 8px', display:'flex',
+        alignItems:'center', justifyContent:'space-between', gap:16 }}>
+        <div>
+          <div style={{ fontSize:9.5, letterSpacing:'.1em', textTransform:'uppercase',
+            color:'rgba(255,255,255,.42)', fontWeight:500, marginBottom:2 }}>
+            Altus Equity – Investment Committee Memo – Confidential
+          </div>
+          <div style={{ fontSize:20, fontWeight:700, color:'#fff', lineHeight:1.05, fontFamily:IC.serif }}>
+            Submarket & Location Review — {deal.name||'Untitled Deal'}
+          </div>
+        </div>
+        {sub.overallGrade && (
+          <div style={{ display:'inline-flex', alignItems:'center', gap:7, border:'1.5px solid '+IC.gold,
+            borderRadius:4, padding:'5px 12px', color:IC.gold, fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
+            Submarket Grade: {sub.overallGrade}
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding:'5px', display:'flex', flexDirection:'column', gap:5 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 }}>
+          <div style={panel}>
+            <PanelHdr>Resident Sentiment</PanelHdr>
+            <div style={{ padding:'6px 11px 8px' }}>
+              <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:6 }}>
+                <span style={{ fontSize:20, fontWeight:700, color:IC.navy }}>{sent.rating!=null?sent.rating.toFixed(1):'—'}</span>
+                <span style={{ fontSize:10, color:IC.muted }}>{sent.reviewCount?sent.reviewCount+' reviews · ':''}{sent.trend||''}</span>
+              </div>
+              {(sent.positives||[]).slice(0,3).map((t,i)=><Bul key={'p'+i} text={t} tone="pos" />)}
+              {(sent.negatives||[]).slice(0,3).map((t,i)=><Bul key={'n'+i} text={t} tone="neg" />)}
+            </div>
+          </div>
+          <div style={panel}>
+            <PanelHdr>Crime Snapshot (vs. Metro)</PanelHdr>
+            <div style={{ padding:'6px 11px 8px' }}>
+              {[['Overall', crime.overall], ['Violent Crime', crime.violentCrime], ['Property Crime', crime.propertyCrime]]
+                .filter(([,c])=>c).map(([lbl,c])=>
+                  <DR key={lbl} label={lbl} value={(c.label||'—')+(c.vsMetro?' · '+c.vsMetro:'')} />
+                )}
+              {(crime.investmentImplication||[]).slice(0,2).map((t,i)=><Bul key={i} text={t} />)}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 }}>
+          <div style={panel}>
+            <PanelHdr>Economic Drivers</PanelHdr>
+            <div style={{ padding:'6px 11px 8px' }}>
+              {(econ.capitalInjections||[]).slice(0,4).map((c,i)=>
+                <DR key={i} label={c.name} value={c.amount} />
+              )}
+              {econ.populationTrend && (
+                <div style={{ marginTop:6, fontSize:10, color:IC.muted, lineHeight:1.4 }}>
+                  Population {econ.populationTrend.cagr5yr} 5-yr CAGR — {econ.populationTrend.vsState}
+                </div>
+              )}
+            </div>
+          </div>
+          <div style={panel}>
+            <PanelHdr>Submarket Context</PanelHdr>
+            <div style={{ padding:'6px 11px 8px' }}>
+              {sub.overallAssessment && (
+                <div style={{ fontSize:11, lineHeight:1.5, color:IC.navy, marginBottom:8 }}>{sub.overallAssessment}</div>
+              )}
+              {(sub.comparables||[]).length>0 && (
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:10.5 }}>
+                  <tbody>
+                    {sub.comparables.slice(0,6).map((c) => (
+                      <tr key={c.rank} style={{ background:c.isSubject?IC.line2:'transparent' }}>
+                        <td style={{ padding:'2px 6px', color:IC.muted, width:20 }}>{c.rank}</td>
+                        <td style={{ padding:'2px 6px', fontWeight:c.isSubject?700:500, color:IC.navy }}>{c.name}</td>
+                        <td style={{ padding:'2px 6px', textAlign:'right', color:gradeColor, fontWeight:600 }}>{c.label}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ borderTop:'1px solid '+IC.line, background:'#f4f6f9', padding:'5px 18px',
+        display:'flex', justifyContent:'space-between', fontSize:8.5, color:IC.faint }}>
+        <span>Altus Equity — For Investment Committee use only.</span>
+        <span>Independent read · verify material figures before IC</span>
+      </div>
+    </div>
+  );
+}
+
 function Bul({ text, tone }) {
   const bg = tone==='pos'?IC.pos:tone==='neg'?IC.neg:IC.blue;
   return (
@@ -440,7 +500,7 @@ function ICMemoSheet({ deal }) {
   const memo  = (deal.memo&&deal.memo.data) ? deal.memo.data : {};
   const mr    = (deal.marketReview&&deal.marketReview.status==='done') ? deal.marketReview.data : null;
 
-  const basis   = (+deal.purchasePrice||0)+(+deal.capex||0);
+  const basis   = (+deal.purchasePrice||0)+(+deal.capex||0)+(uw?uw.closingCosts:0);
   const stabRow = uw&&uw.rows ? uw.rows[Math.min(uw.stabYear||3,uw.hold)] : null;
   const yr1Row  = uw&&uw.rows ? uw.rows[1] : null;
   const irr     = uw ? uw.irr : null;
@@ -496,20 +556,23 @@ function ICMemoSheet({ deal }) {
           <div style={panel}>
             <PanelHdr>Deal Snapshot</PanelHdr>
             {[
-              ['Purchase Price',  _m(deal.purchasePrice)],
+              ['Guidance Price',  _m(deal.askPrice)],
+              ['Offer Price',     _m(deal.purchasePrice)],
+              ['Closing Costs'+(uw?' ('+_p(uw.closingPct)+')':''), uw?_m(uw.closingCosts):'—'],
               ['CapEx Budget',    _m(deal.capex)],
               ['Total Basis',     _m(basis), true],
               ['Units',           deal.units?deal.units.toLocaleString():'—'],
               ['Year Built',      deal.vintage||'—'],
-              ['Physical Occupancy', uw?_p(1-uw.inPlaceEconVac,0):'—'],
-              ['Econ. Vacancy',  uw?_p(uw.inPlaceEconVac):'—'],
-              ['Going-In Cap',   _p(caps.goingIn), false, true],
-              ['Stabilized Cap (Yr '+(uw?(uw.stabYear||3):3)+')', _p(caps.stab)],
+              ['Physical Vacancy', uw&&uw.gpr0>0?_p(uw.physVac/uw.gpr0):'—'],
+              ['Loss to Lease',   uw&&uw.gpr0>0?_p(uw.ltl/uw.gpr0):'—'],
+              ['Bad Debt',        uw&&uw.gpr0>0?_p(uw.badDebt/uw.gpr0):'—'],
+              ['Concessions',     uw&&uw.gpr0>0?_p(uw.concessions/uw.gpr0):'—'],
+              ['Econ. Vacancy',   uw?_p(uw.inPlaceEconVac):'—', false, true],
             ].map(([lbl,val,s,sep])=><DR key={lbl} label={lbl} value={val} strong={!!s} sep={!!sep} />)}
           </div>
           <div style={panel}>
             <PanelHdr>Return Summary</PanelHdr>
-            <ReturnSummaryPanel uw={uw} lp={lp} />
+            <ReturnSummaryPanel uw={uw} lp={lp} caps={caps} />
           </div>
           <div style={panel}>
             <PanelHdr>Capital Structure & Financing</PanelHdr>
@@ -517,21 +580,23 @@ function ICMemoSheet({ deal }) {
           </div>
         </div>
 
-        {/* ROW 2 — Return Decomposition | Underwriting Assumptions */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 }}>
-          <div style={panel}>
-            <PanelHdr>Return Decomposition</PanelHdr>
-            {uw ? <ReturnDecomp uw={uw} /> :
-              <div style={{ padding:'8px 11px', fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
-          </div>
-          <div style={panel}>
-            <PanelHdr>Underwriting Assumptions</PanelHdr>
-            {uw ? <UWAssumptions uw={uw} /> :
-              <div style={{ padding:'8px 11px', fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
+        {/* ROW 2 — Underwriting Assumptions */}
+        <div style={panel}>
+          <PanelHdr>Underwriting Assumptions</PanelHdr>
+          {uw ? <UWAssumptions uw={uw} /> :
+            <div style={{ padding:'8px 11px', fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
+        </div>
+
+        {/* ROW 3 — Operating Forecast (NOI) */}
+        <div style={panel}>
+          <PanelHdr>Operating Forecast (NOI)</PanelHdr>
+          <div style={{ padding:'4px 11px 5px' }}>
+            {uw ? <OperatingForecast uw={uw} /> :
+              <div style={{ fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
           </div>
         </div>
 
-        {/* ROW 3 — Scenario Analysis (compact) */}
+        {/* ROW 4 — Scenario Analysis (compact) */}
         <div style={panel}>
           <div style={{ padding:'4px 11px 4px', borderBottom:'1px solid '+IC.line,
             display:'flex', alignItems:'baseline', gap:10 }}>
@@ -543,15 +608,6 @@ function ICMemoSheet({ deal }) {
           </div>
           <div style={{ padding:'4px 11px 5px' }}>
             <ScenarioAnalysis deal={deal} uw={uw} />
-          </div>
-        </div>
-
-        {/* ROW 4 — Operating Forecast (NOI) */}
-        <div style={panel}>
-          <PanelHdr>Operating Forecast (NOI)</PanelHdr>
-          <div style={{ padding:'4px 11px 5px' }}>
-            {uw ? <OperatingForecast uw={uw} /> :
-              <div style={{ fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>}
           </div>
         </div>
 
@@ -607,26 +663,64 @@ function ICMemoSheet({ deal }) {
 }
 
 // ─── Button + overlay ─────────────────────────────────────────────────────────
-function ICMemoButton({ deal, onRunMemo }) {
+function ICMemoButton({ deal, onRunMemo, onRunMarketReview }) {
   const [open, setOpen] = useSIC(false);
   const [busy, setBusy] = useSIC(false);
+  const [exporting, setExporting] = useSIC(false);
   const [err,  setErr]  = useSIC(null);
   const hasMemo = deal.memo&&deal.memo.data;
+  const mr = (deal.marketReview&&deal.marketReview.status==='done') ? deal.marketReview.data : null;
 
+  const ensureMR = async () => {
+    if (onRunMarketReview && (!deal.marketReview || deal.marketReview.status!=='done')) {
+      try { await onRunMarketReview(deal.id); } catch(e) {}
+    }
+  };
   const openMemo = async () => {
     setOpen(true); setErr(null);
     if (!hasMemo) {
       setBusy(true);
-      try   { await onRunMemo(deal.id); }
+      try   { await Promise.all([onRunMemo(deal.id), ensureMR()]); }
       catch (e) { setErr(String(e&&e.message?e.message:e)); }
       finally   { setBusy(false); }
+    } else {
+      ensureMR();
     }
   };
   const regen = async () => {
     setBusy(true); setErr(null);
-    try   { await onRunMemo(deal.id); }
+    try   { await Promise.all([onRunMemo(deal.id), ensureMR()]); }
     catch (e) { setErr(String(e&&e.message?e.message:e)); }
     finally   { setBusy(false); }
+  };
+  const exportPDF = async () => {
+    if (!window.html2canvas || !window.jspdf) { window.print(); return; }
+    setExporting(true);
+    try {
+      const { jsPDF } = window.jspdf;
+      const node1 = document.getElementById('ic-memo-sheet');
+      const c1 = await window.html2canvas(node1, { scale:2, backgroundColor:'#ffffff', useCORS:true });
+      const w1 = node1.offsetWidth, h1 = node1.offsetHeight;
+      const pdf = new jsPDF({ unit:'px', format:[w1,h1] });
+      pdf.addImage(c1.toDataURL('image/png'), 'PNG', 0, 0, w1, h1);
+      const node2 = document.getElementById('ic-memo-page2');
+      if (node2) {
+        const c2 = await window.html2canvas(node2, { scale:2, backgroundColor:'#ffffff', useCORS:true });
+        const w2 = node2.offsetWidth, h2 = node2.offsetHeight;
+        pdf.addPage([w2,h2]);
+        pdf.addImage(c2.toDataURL('image/png'), 'PNG', 0, 0, w2, h2);
+      }
+      const blobUrl = pdf.output('bloburl');
+      const filename = (deal.name||'IC-Memo').replace(/[^a-z0-9]+/gi,'-')+'-IC-Memo.pdf';
+      const a = document.createElement('a');
+      a.href = blobUrl; a.download = filename; a.rel = 'noopener'; a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 4000);
+    } catch (e) {
+      console.error(e);
+      window.print();
+    } finally { setExporting(false); }
   };
 
   return (
@@ -646,13 +740,13 @@ function ICMemoButton({ deal, onRunMemo }) {
             padding:'20px 0', overflow:'auto' }}>
 
           <div className="memo-toolbar" style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
-            <button onClick={()=>window.print()} disabled={busy}
+            <button onClick={exportPDF} disabled={busy||exporting}
               style={{ border:'none', background:'var(--accent)', color:'#fff', borderRadius:8,
                 padding:'9px 18px', fontSize:13, fontWeight:600, cursor:'pointer',
                 fontFamily:'var(--font)', display:'inline-flex', alignItems:'center', gap:7 }}>
-              <Icon name="download" size={14} /> Export PDF
+              <Icon name="download" size={14} /> {exporting?'Exporting…':'Export PDF'}
             </button>
-            <button onClick={regen} disabled={busy}
+            <button onClick={regen} disabled={busy||exporting}
               style={{ border:'1px solid rgba(255,255,255,.4)', background:'transparent',
                 color:'#fff', borderRadius:8, padding:'9px 16px', fontSize:13,
                 fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>
@@ -677,10 +771,18 @@ function ICMemoButton({ deal, onRunMemo }) {
               </div>
             </div>
           ) : (
-            <div style={{ boxShadow:'0 24px 64px rgba(0,0,0,.5)', borderRadius:8,
-              overflow:'hidden', maxWidth:'94vw' }}>
-              <ICMemoSheet deal={deal} />
-            </div>
+            <React.Fragment>
+              <div style={{ boxShadow:'0 24px 64px rgba(0,0,0,.5)', borderRadius:8,
+                overflow:'hidden', maxWidth:'94vw' }}>
+                <ICMemoSheet deal={deal} />
+              </div>
+              {mr && (
+                <div style={{ boxShadow:'0 24px 64px rgba(0,0,0,.5)', borderRadius:8,
+                  overflow:'hidden', maxWidth:'94vw', marginTop:20 }}>
+                  <ICMemoPage2 deal={deal} mr={mr} />
+                </div>
+              )}
+            </React.Fragment>
           )}
 
           {err && <div style={{ marginTop:12, color:'#ffb4b6', fontSize:13 }}>{err}</div>}

@@ -46,7 +46,7 @@ const PIPELINE_STAGES = ['New Deal','Quick UW','Full UW','Excel UW'];
 const LOI_STAGES = ['LOI Submitted','LOI Lost','Under Contract','Purchased'];
 // Linear happy-path progression used by the deal-detail stepper.
 const STAGES = ['New Deal','Quick UW','Full UW','Excel UW','LOI Submitted','Under Contract','Purchased'];
-const STAGE_ALL = ['New Deal','Quick UW','Full UW','Excel UW','LOI Submitted','LOI Lost','Under Contract','Purchased','Dead'];
+const STAGE_ALL = ['New Deal','Quick UW','Full UW','Excel UW','LOI Submitted','LOI Lost','Under Contract','Purchased','Dead','Stash'];
 const STAGE_META = {
   'New Deal':       { c:'#5b7088', bg:'#eef1f5', label:'New Deal' },
   'Quick UW':       { c:'#2f6df0', bg:'#e8f0fe', label:'Quick UW' },
@@ -57,6 +57,7 @@ const STAGE_META = {
   'Under Contract': { c:'#0c7a43', bg:'#e0f2ea', label:'Under Contract' },
   'Purchased':      { c:'#0a6b3b', bg:'#d6efe0', label:'Purchased' },
   'Dead':           { c:'#8c7460', bg:'#f2ece4', label:'Dead' },
+  'Stash':          { c:'#6b7a8d', bg:'#eef1f5', label:'Stash' },
 };
 // Map legacy stage names (and Notion imports) onto the current set.
 const STAGE_MIGRATE = {
@@ -131,12 +132,14 @@ function Icon({ name, size=16, style }){
     trash:    <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></>,
     star:     <path d="M12 2.5l3.09 6.26 6.91 1-5 4.87 1.18 6.87L12 17.9l-6.18 3.6L7 14.63l-5-4.87 6.91-1z" strokeLinejoin="round"/>,
     lock:     <><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></>,
+    eyeOff:   <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></>,
+    noEntry:  <><circle cx="12" cy="12" r="9"/><path d="M6.5 17.5l11-11"/></>,
   };
   return <svg {...p}>{paths[name]}</svg>;
 }
 
 /* ── Star toggle — click to mark a deal as priority-starred ── */
-function StarToggle({ on, onToggle, size = 15 }) {
+function StarToggle({ on, onToggle, size = 19 }) {
   return (
     <button onClick={(e) => { e.stopPropagation(); onToggle(); }}
       title={on ? 'Remove from Priority Deals' : 'Star for Priority Deals'}
@@ -173,13 +176,15 @@ function StageBadgeSolid({ stage, count }){
   );
 }
 /* ── Off-market toggle — click to mark a deal as off-market without opening it ── */
-function OffMarketToggle({ on, onToggle, size = 13 }) {
+function OffMarketToggle({ on, onToggle, size = 17 }) {
   return (
     <button onClick={(e) => { e.stopPropagation(); onToggle(); }}
       title={on ? 'Off-market — click to unmark' : 'Mark as off-market'}
-      style={{ border: 'none', background: 'none', padding: 3, cursor: 'pointer', display: 'inline-flex',
-        alignItems: 'center', justifyContent: 'center', flex: 'none', lineHeight: 0 }}>
-      <Icon name="lock" size={size} style={{ color: on ? 'var(--warn)' : 'var(--faint)' }} />
+      style={{ border: 'none', background: 'none', padding: '3px 7px', cursor: 'pointer', display: 'inline-flex',
+        alignItems: 'center', justifyContent: 'center', textAlign: 'center', flex: 'none', lineHeight: 1,
+        fontSize: Math.round(size * 0.62), fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
+        color: on ? 'var(--warn)' : 'var(--faint)' }}>
+      Off Market
     </button>
   );
 }
@@ -192,7 +197,7 @@ function OffMarketTag({ size='md', style }){
     <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:pad, borderRadius:999,
       background:'var(--warn-soft)', color:'var(--warn)', fontSize:fs, fontWeight:700,
       letterSpacing:'.02em', whiteSpace:'nowrap', lineHeight:1.3, ...style }}>
-      <Icon name="lock" size={size==='sm'?9:10} style={{ color:'var(--warn)' }}/>
+      <Icon name="noEntry" size={size==='sm'?9:10} style={{ color:'var(--warn)' }}/>
       Off-Market
     </span>
   );

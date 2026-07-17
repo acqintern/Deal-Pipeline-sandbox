@@ -191,6 +191,65 @@ function PriorityDealsWidget({ deals, onOpen, onPatch }) {
   );
 }
 
+/* ============================ Stash Widget ============================ */
+// Deals parked out of active review (bucket: 'Stash') — collapsible, same pattern as Priority Deals.
+function StashWidget({ deals, onOpen, onPatch }) {
+  const LS_STASH_COLLAPSED = 'altus_stash_collapsed_v1';
+  const [collapsed, setCollapsed] = useStateV(() => {
+    try { return localStorage.getItem(LS_STASH_COLLAPSED) !== '0'; } catch(e) { return true; }
+  });
+  const toggleCollapsed = () => { setCollapsed((c) => { const next = !c; try { localStorage.setItem(LS_STASH_COLLAPSED, next ? '1' : '0'); } catch(e) {} return next; }); };
+
+  const rows = useMemoV(() => deals.filter((d) => d.stage === 'Stash'), [deals]);
+  if (!rows.length) return null;
+
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow)', marginTop: 22, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 18px', borderBottom: collapsed ? 'none' : '1px solid var(--line)', background: 'var(--panel)' }}>
+        <button onClick={toggleCollapsed} style={{ display: 'flex', alignItems: 'center', gap: 9, border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
+          <span style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--slate)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+            <Icon name="clip" size={13} />
+          </span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-.01em' }}>Stash</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{rows.length} deal{rows.length!==1?'s':''} parked out of active review</span>
+          <Icon name={collapsed ? 'chevR' : 'chevD'} size={13} style={{ color: 'var(--faint)' }} />
+        </button>
+      </div>
+
+      {!collapsed && <React.Fragment>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px 130px 140px 90px', padding: '0 18px', background: 'var(--panel-3)', borderBottom: '1px solid var(--line)' }}>
+        {['Deal', 'Market', 'Stage', 'Last Activity', ''].map((h, i) => (
+          <div key={h+i} style={{ padding: '6px 0', fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: i===4?'right':'left' }}>
+            {h}
+          </div>
+        ))}
+      </div>
+      {rows.map((deal, i) => (
+        <div key={deal.id} onClick={() => onOpen(deal.id)}
+          style={{ display: 'grid', gridTemplateColumns: '1fr 130px 130px 140px 90px', alignItems: 'center',
+            width: '100%', padding: '0 18px', minHeight: 42,
+            borderBottom: i < rows.length - 1 ? '1px solid var(--line)' : 'none',
+            cursor: 'pointer', transition: 'background .1s', fontFamily: 'var(--font)' }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--accent-soft)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+          <div className="clip" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{deal.name}</div>
+          <div className="clip" style={{ fontSize: 12.5, color: 'var(--slate)' }}>{deal.market || '—'}</div>
+          <div><StageBadge stage={deal.stage} dot={false} size="sm" /></div>
+          <div className="num" style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtRelative(lastActivityOf(deal)) || '—'}</div>
+          <div style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+            {onPatch && <button onClick={() => onPatch(deal.id, { stage: 'New Deal' })}
+              style={{ border: '1px solid var(--line-2)', background: 'var(--panel)', borderRadius: 6, padding: '3px 9px',
+                fontSize: 11, fontWeight: 600, color: 'var(--slate)', cursor: 'pointer', fontFamily: 'var(--font)' }}>
+              Unstash
+            </button>}
+          </div>
+        </div>
+      ))}
+      </React.Fragment>}
+    </div>
+  );
+}
+
 const RANGES = [
   { value:30,  label:'30 days' },
   { value:90,  label:'90 days' },
@@ -205,22 +264,29 @@ function inWindow(dateStr, days, endOffsetDays=0){
   const start = end - days*DAY;
   return t > start && t <= end;
 }
-const ADVANCED = ['Underwritten','LOI Submitted','Under Contract','LOI Lost'];
 const WON = ['Under Contract'];
 
 function windowMetrics(deals, days, endOffsetDays=0){
   const entered = deals.filter(d=> inWindow(d.dateEntered, days, endOffsetDays));
-  const underwritten = entered.filter(d=> ADVANCED.includes(d.stage));
   const loiSub = deals.filter(d=> inWindow(d.dateLOISubmitted, days, endOffsetDays));
+  const loiSubOnMarket = loiSub.filter(d=> !d.offMarket);
+  const loiSubOffMarket = loiSub.filter(d=> d.offMarket);
   const loiWon = deals.filter(d=> WON.includes(d.stage) && inWindow(d.dateUnderContract, days, endOffsetDays));
   const loiLost = deals.filter(d=> d.stage==='LOI Lost' && inWindow(d.dateLost, days, endOffsetDays));
   const offMarket = entered.filter(d=> d.offMarket);
+  const onMarket = entered.filter(d=> !d.offMarket);
+  const loiWonOffMarket = loiWon.filter(d=> d.offMarket);
+  const loiWonOnMarket = loiWon.filter(d=> !d.offMarket);
   const sum = (arr,f)=> arr.reduce((s,d)=>s+(f(d)||0),0);
   return {
     entered: entered.length,
-    underwritten: underwritten.length,
+    onMarket: onMarket.length,
     loiSubmitted: loiSub.length,
+    loiSubmittedOnMarket: loiSubOnMarket.length,
+    loiSubmittedOffMarket: loiSubOffMarket.length,
     loiWon: loiWon.length,
+    loiWonOffMarket: loiWonOffMarket.length,
+    loiWonOnMarket: loiWonOnMarket.length,
     loiLost: loiLost.length,
     offMarket: offMarket.length,
     dollarSubmitted: sum(loiSub, d=> d.loiAmount || d.purchasePrice),
@@ -240,7 +306,6 @@ function MetricsView({ deals, onOpen }){
   // funnel steps
   const funnel = [
     { label:'Entered Pipeline', value:cur.entered,      color:'#6b7a8d' },
-    { label:'Underwritten',     value:cur.underwritten, color:'#2f6df0' },
     { label:'LOI Submitted',    value:cur.loiSubmitted, color:'#bd7a16' },
     { label:'Won / Under Contract', value:cur.loiWon,   color:'#0f8a4d' },
   ];
@@ -250,6 +315,14 @@ function MetricsView({ deals, onOpen }){
   const loiActivity = deals
     .filter(d=> d.dateLOISubmitted && inWindow(d.dateLOISubmitted, days))
     .sort((a,b)=> b.dateLOISubmitted.localeCompare(a.dateLOISubmitted));
+
+  // metro leaderboard — where are we actually submitting LOIs?
+  const metroRank = useMemoV(()=>{
+    const map = {};
+    loiActivity.forEach(dl=>{ const mkt=dl.market||'Unspecified'; map[mkt]=(map[mkt]||0)+1; });
+    return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  }, [loiActivity]);
+  const metroMax = Math.max(...metroRank.map(([,c])=>c), 1);
 
   return (
     <div className="fade" style={{ padding:'24px 30px 60px', maxWidth:1280, margin:'0 auto' }}>
@@ -265,22 +338,24 @@ function MetricsView({ deals, onOpen }){
 
       {/* activity KPIs */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14 }}>
-        <Kpi label="Deals Entered" value={fmtNum(cur.entered)} icon="plus" accent="#6b7a8d"
-             delta={d(cur.entered,prev.entered)} sub={isAll?'in pipeline':'vs prior '+rangeLabel}/>
-        <Kpi label="Underwritten" value={fmtNum(cur.underwritten)} icon="calc" accent="#2f6df0"
-             delta={d(cur.underwritten,prev.underwritten)} sub={isAll?'completed':'vs prior period'}/>
+        <Kpi label="On-Market Deals" value={fmtNum(cur.onMarket)} icon="plus" accent="#6b7a8d"
+             delta={d(cur.onMarket,prev.onMarket)} sub={cur.entered ? fmtPct(cur.onMarket/cur.entered,0)+' of entered' : (isAll?'in pipeline':'vs prior '+rangeLabel)}/>
+        <Kpi label="Off-Market Deals" value={fmtNum(cur.offMarket)} icon="lock" accent="var(--warn)"
+             delta={d(cur.offMarket,prev.offMarket)} sub={cur.entered ? fmtPct(cur.offMarket/cur.entered,0)+' of entered' : 'sourced directly'}/>
         <Kpi label="LOIs Submitted" value={fmtNum(cur.loiSubmitted)} icon="flag" accent="#bd7a16"
-             delta={d(cur.loiSubmitted,prev.loiSubmitted)} sub={isAll?'':'vs prior period'}/>
+             delta={d(cur.loiSubmitted,prev.loiSubmitted)} sub={
+               <span style={{ display:'flex', gap:6 }}>
+                 <span className="num" style={{ fontSize:12, fontWeight:700, color:'#6b7a8d', background:'#eef1f5', padding:'2px 7px', borderRadius:999 }}>{cur.loiSubmittedOnMarket} on-market</span>
+                 <span className="num" style={{ fontSize:12, fontWeight:700, color:'var(--warn)', background:'var(--warn-soft)', padding:'2px 7px', borderRadius:999 }}>{cur.loiSubmittedOffMarket} off-market</span>
+               </span>
+             }/>
         <Kpi label="LOIs Won" value={fmtNum(cur.loiWon)} icon="check" accent="#0f8a4d"
-             delta={d(cur.loiWon,prev.loiWon)} sub="under contract"/>
-      </div>
-
-      {/* off-market tracker — underneath Deals Entered */}
-      <div style={{ display:'flex', marginTop:14 }}>
-        <div style={{ width:260, flex:'none' }}>
-          <Kpi label="Off-Market Deals" value={fmtNum(cur.offMarket)} icon="lock" accent="var(--warn)"
-               delta={d(cur.offMarket,prev.offMarket)} sub={cur.entered ? fmtPct(cur.offMarket/cur.entered,0)+' of entered' : 'sourced directly'}/>
-        </div>
+             delta={d(cur.loiWon,prev.loiWon)} sub={
+               <span style={{ display:'flex', gap:6 }}>
+                 <span className="num" style={{ fontSize:12, fontWeight:700, color:'#6b7a8d', background:'#eef1f5', padding:'2px 7px', borderRadius:999 }}>{cur.loiWonOnMarket} on-market</span>
+                 <span className="num" style={{ fontSize:12, fontWeight:700, color:'var(--warn)', background:'var(--warn-soft)', padding:'2px 7px', borderRadius:999 }}>{cur.loiWonOffMarket} off-market</span>
+               </span>
+             }/>
       </div>
 
       {/* dollar volume + conversion */}
@@ -304,8 +379,8 @@ function MetricsView({ deals, onOpen }){
         </div>
       </div>
 
-      {/* funnel + activity */}
-      <div style={{ display:'grid', gridTemplateColumns:'1.15fr 1fr', gap:16, marginTop:16, alignItems:'start' }}>
+      {/* funnel */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:16, marginTop:16, alignItems:'start' }}>
         <Card title="Conversion Funnel" right={<span style={{ fontSize:12, color:'var(--muted)' }}>{isAll?'all time':rangeLabel}</span>}>
           <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
             {funnel.map((f,i)=>{
@@ -331,25 +406,142 @@ function MetricsView({ deals, onOpen }){
           </div>
         </Card>
 
-        <Card title="LOI Activity" pad={false} right={<span style={{ fontSize:12, color:'var(--muted)' }}>{loiActivity.length} in range</span>}>
-          <div style={{ maxHeight:340, overflow:'auto' }}>
-            {loiActivity.length===0 && <div style={{ padding:'40px 18px', textAlign:'center', color:'var(--muted)', fontSize:13 }}>No LOIs submitted in this window.</div>}
-            {loiActivity.map(d=>(
-              <button key={d.id} onClick={()=>onOpen(d.id)} style={{ display:'flex', alignItems:'center', gap:12, width:'100%',
-                padding:'11px 18px', border:'none', borderBottom:'1px solid var(--line)', background:'transparent', textAlign:'left' }}
-                onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'}
-                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div className="clip" style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{d.name}</div>
-                  <div style={{ fontSize:11.5, color:'var(--muted)', marginTop:1 }}>{fmtDate(d.dateLOISubmitted)} · {d.market}</div>
+        <Card title="LOIs by Metro" right={<span style={{ fontSize:12, color:'var(--muted)' }}>{loiActivity.length} in range</span>}>
+          {metroRank.length===0 ? (
+            <div style={{ padding:'40px 18px', textAlign:'center', color:'var(--muted)', fontSize:13 }}>No LOI activity in this window.</div>
+          ) : (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:14 }}>
+              {metroRank.map(([mkt,count])=>(
+                <div key={mkt} style={{ border:'1px solid var(--line)', borderRadius:10, padding:'12px 14px',
+                  display:'flex', alignItems:'baseline', justifyContent:'space-between' }}>
+                  <span className="clip" style={{ fontSize:14, fontWeight:600, color:'var(--ink)' }}>{mkt}</span>
+                  <span className="num" style={{ fontSize:18, fontWeight:700, color:'var(--slate)' }}>{count}</span>
                 </div>
-                <span className="num" style={{ fontSize:13, fontWeight:600, color:'var(--slate)' }}>{fmtShort(d.loiAmount||d.purchasePrice)}</span>
-                <StageBadge stage={d.stage} size="sm" dot={false}/>
-              </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
+    </div>
+  );
+}
+
+/* ============================ Broker Calls ============================ */
+// Every logged broker call across all deals — grouped by date, then by metro, exportable to Excel for GHL.
+function BrokerCallsView({ deals, onOpen }){
+  const [days, setDays] = useStateV(99999);
+
+  const allCalls = useMemoV(() => {
+    const flat = [];
+    deals.forEach((d) => (Array.isArray(d.callLog) ? d.callLog : []).forEach((e) => {
+      flat.push({ ...e, dealId: d.id, dealName: d.name, market: d.market || 'Unspecified' });
+    }));
+    return flat.sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
+  }, [deals]);
+
+  const isAll = days === 99999;
+  const cutoff = TODAY.getTime() - days*DAY;
+  const inRange = useMemoV(() => isAll ? allCalls : allCalls.filter((e) => e.ts && new Date(e.ts).getTime() >= cutoff), [allCalls, days]);
+
+  // group by day, then by metro within each day
+  const grouped = useMemoV(() => {
+    const byDay = {};
+    inRange.forEach((e) => {
+      const dayKey = e.ts ? new Date(e.ts).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' }) : 'Unknown Date';
+      byDay[dayKey] = byDay[dayKey] || { sortTs: e.ts, byMetro: {} };
+      byDay[dayKey].byMetro[e.market] = byDay[dayKey].byMetro[e.market] || [];
+      byDay[dayKey].byMetro[e.market].push(e);
+    });
+    return Object.entries(byDay).sort((a,b) => (b[1].sortTs||'').localeCompare(a[1].sortTs||''));
+  }, [inRange]);
+
+  const exportRows = (rows) => rows.map((e) => {
+    const parts = (e.brokerName || '').trim().split(/\s+/);
+    return {
+      'First Name': parts[0] || '',
+      'Last Name': parts.slice(1).join(' ') || '',
+      'Email': e.brokerEmail || '',
+      'Phone': e.brokerPhone || '',
+      'Company Name': e.brokerFirm || '',
+      'Property Name': e.dealName || '',
+      'Metro': e.market || '',
+      'Notes': e.note || '',
+      'Call Date': e.ts ? new Date(e.ts).toLocaleDateString() : '',
+    };
+  });
+
+  const doExport = (rows, filename) => {
+    if (!window.XLSX || !rows.length) return;
+    const ws = window.XLSX.utils.json_to_sheet(exportRows(rows));
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'Broker Calls');
+    window.XLSX.writeFile(wb, filename);
+  };
+
+  return (
+    <div className="fade" style={{ padding:'24px 30px 60px', maxWidth:1280, margin:'0 auto' }}>
+      <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
+        <div>
+          <h2 style={{ margin:0, fontSize:21, fontWeight:700, color:'var(--ink)' }}>Broker Calls</h2>
+          <p style={{ margin:'4px 0 0', fontSize:13.5, color:'var(--muted)' }}>{inRange.length} logged call{inRange.length!==1?'s':''} across all deals</p>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+          <Seg value={days} onChange={setDays} options={RANGES}/>
+          <button onClick={() => doExport(inRange, 'broker_calls_' + (isAll?'all':days+'d') + '.xlsx')} disabled={!inRange.length}
+            style={{ display:'inline-flex', alignItems:'center', gap:6, height:36, padding:'0 14px', border:'1px solid var(--line-2)',
+              borderRadius:8, background:'var(--panel)', fontSize:12.5, fontWeight:600,
+              color:inRange.length?'var(--slate)':'var(--faint)', cursor:inRange.length?'pointer':'default' }}>
+            <Icon name="download" size={13}/> Export {isAll?'All':'Range'}
+          </button>
+          {!isAll && <button onClick={() => doExport(allCalls, 'broker_calls_all.xlsx')} disabled={!allCalls.length}
+            style={{ display:'inline-flex', alignItems:'center', gap:6, height:36, padding:'0 14px', border:'1px solid var(--line-2)',
+              borderRadius:8, background:'var(--panel)', fontSize:12.5, fontWeight:600,
+              color:allCalls.length?'var(--slate)':'var(--faint)', cursor:allCalls.length?'pointer':'default' }}>
+            <Icon name="download" size={13}/> Export All
+          </button>}
+        </div>
+      </div>
+
+      {grouped.length === 0 ? (
+        <div style={{ padding:'60px 20px', textAlign:'center', color:'var(--muted)', background:'var(--panel)',
+          border:'1px solid var(--line)', borderRadius:'var(--radius-lg)' }}>
+          <div style={{ fontSize:14, fontWeight:500, color:'var(--ink)' }}>No broker calls logged in this window.</div>
+          <div style={{ fontSize:12.5, marginTop:4 }}>Log calls from a deal's Summary tab and they'll show up here.</div>
+        </div>
+      ) : grouped.map(([dayKey, { byMetro }]) => {
+        const metros = Object.entries(byMetro).sort((a,b) => b[1].length - a[1].length);
+        const dayTotal = metros.reduce((s,[,rows]) => s+rows.length, 0);
+        return (
+          <div key={dayKey} style={{ marginBottom:22 }}>
+            <div style={{ display:'flex', alignItems:'baseline', gap:10, marginBottom:10 }}>
+              <span style={{ fontSize:15, fontWeight:700, color:'var(--ink)' }}>{dayKey}</span>
+              <span className="num" style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>{dayTotal} call{dayTotal!==1?'s':''}</span>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              {metros.map(([metro, rows]) => (
+                <Card key={metro} title={metro} pad={false} right={<span style={{ fontSize:12, color:'var(--muted)' }}>{rows.length} call{rows.length!==1?'s':''}</span>}>
+                  {rows.map((e,i) => (
+                    <div key={e.id} onClick={() => onOpen(e.dealId)} style={{ display:'grid', gridTemplateColumns:'80px 1fr 1fr', gap:12,
+                      padding:'11px 18px', cursor:'pointer', borderBottom: i<rows.length-1 ? '1px solid var(--line)' : 'none' }}
+                      onMouseEnter={(ev) => ev.currentTarget.style.background='var(--panel-2)'}
+                      onMouseLeave={(ev) => ev.currentTarget.style.background='transparent'}>
+                      <div className="num" style={{ fontSize:11.5, color:'var(--muted)' }}>
+                        {e.ts ? new Date(e.ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '—'}
+                      </div>
+                      <div className="clip" style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{e.dealName}</div>
+                      <div>
+                        <span style={{ fontSize:12.5, fontWeight:600, color:'var(--ink)' }}>{e.brokerName || 'Unknown broker'}</span>
+                        {e.brokerFirm && <span style={{ fontSize:12, color:'var(--muted)' }}> — {e.brokerFirm}</span>}
+                        {e.note && <div className="clip" style={{ fontSize:12, color:'var(--slate)', marginTop:1 }}>{e.note}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </Card>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -448,4 +640,4 @@ function AnalyticsView({ deals, onOpen }){
   );
 }
 
-Object.assign(window, { MetricsView, AnalyticsView, PriorityDealsWidget, windowMetrics, inWindow, RANGES });
+Object.assign(window, { MetricsView, AnalyticsView, PriorityDealsWidget, StashWidget, BrokerCallsView, windowMetrics, inWindow, RANGES });
