@@ -528,7 +528,95 @@ function QuickUnderwritingTab({ deal, set }) {
   );
 }
 
+/* ───────────── Portfolio: per-property switcher ───────────── */
+function PropertyUWSwitcher({ props, view, setView }) {
+  const chip = (key, label, active) => (
+    <button key={key} onClick={() => setView(key)} style={{
+      border: active ? '1px solid var(--accent)' : '1px solid var(--line-2)',
+      background: active ? 'var(--accent-soft)' : 'var(--panel)', color: active ? 'var(--accent)' : 'var(--slate)',
+      borderRadius: 999, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+      {label}
+    </button>
+  );
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {chip('combined', 'Combined (' + props.length + ')', view === 'combined')}
+      {props.map((p, i) => chip('p' + i, p.name || 'Property ' + (i + 1), view === 'p' + i))}
+    </div>
+  );
+}
+
+/* ───────────── Portfolio: combined read-only rollup ───────────── */
+function CombinedUWView({ deal }) {
+  const uw = window.computeCombinedUW ? window.computeCombinedUW(deal) : null;
+  const props = deal.properties || [];
+  const uwCount = props.filter((p) => window.hasUWInputs && window.hasUWInputs(p)).length;
+  if (!uw) {
+    return (
+      <Card>
+        <SectionHead icon="chart" title="Combined Portfolio" desc="Sums each property's independent Full UW into one model." />
+        <div style={{ marginTop: 12, padding: '10px 14px', color: 'var(--muted)', fontSize: 12.5, background: 'var(--panel-2)', borderRadius: 7, fontStyle: 'italic' }}>
+          No property has Full UW inputs yet — open a property tab above and enter Gross Potential Rent to include it here.
+        </div>
+      </Card>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <SectionHead icon="chart" title="Combined Portfolio" desc={uwCount + ' of ' + props.length + ' properties underwritten · summed cash flows, IRR from the combined stream'} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginTop: 14 }}>
+          <GuidancePill label="Total Basis" value={moneyFull(uw.basis)} sub={uw.units ? moneyFull(uw.basis / uw.units) + ' / unit' : ''} />
+          <GuidancePill label="Equity Required" value={moneyFull(uw.initialEquity)} />
+          <GuidancePill label="Equity Multiple" value={uw.equityMultiple != null ? uw.equityMultiple.toFixed(2) + 'x' : '—'} />
+          <GuidancePill label="Levered IRR" value={uw.irr != null ? (uw.irr * 100).toFixed(1) + '%' : '—'} accent={uw.irr != null ? 'var(--pos)' : 'var(--faint)'} />
+        </div>
+      </Card>
+      <CashFlowTable uw={uw} showReturns={uwCount > 0} />
+    </div>
+  );
+}
+
+/* ───────────── Portfolio: one property's independent Full UW ───────────── */
+function PropertyFullUW({ property, onChange }) {
+  const m = computeMetrics(property);
+  const uw = computeUW(property);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <PricingBasis deal={property} set={onChange} m={m} />
+      <IncomeVacancySection deal={property} set={onChange} />
+      <AcqFinancingSection deal={property} set={onChange} uw={uw} />
+      <RefiSection deal={property} set={onChange} uw={uw} />
+      <AssumptionsSection deal={property} set={onChange} uw={uw} />
+      <CashFlowTable uw={uw} showReturns={window.hasUWInputs ? window.hasUWInputs(property) : true} />
+    </div>
+  );
+}
+
+/* ───────────── Portfolio: Full UW tab wrapper ───────────── */
+function PortfolioUWTab({ deal, set }) {
+  const props = deal.properties || [];
+  const [view, setView] = useSU('p0');
+  const propSet = (idx) => (k, v) => {
+    const arr = [...props];
+    arr[idx] = { ...arr[idx], [k]: v };
+    set('properties', arr);
+  };
+  const idx = view.startsWith('p') ? Number(view.slice(1)) : null;
+  const safeIdx = idx != null && props[idx] ? idx : null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <PropertyUWSwitcher props={props} view={view} setView={setView} />
+      {safeIdx != null
+        ? <PropertyFullUW property={props[safeIdx]} onChange={propSet(safeIdx)} />
+        : <CombinedUWView deal={deal} />}
+    </div>
+  );
+}
+
 function FullUnderwritingTab({ deal, set }) {
+  const isPortfolio = !!deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1;
+  if (isPortfolio) return <PortfolioUWTab deal={deal} set={set} />;
   const m = computeMetrics(deal);
   const uw = computeUW(deal);
   return (
