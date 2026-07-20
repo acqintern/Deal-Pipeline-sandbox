@@ -865,6 +865,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   onRunMarketReview, onRunMemo,
   todos, onAddTodo, onPatchTodo, onDeleteTodo, onViewTasks }) {
   const [tab, setTab] = useStateD('summary');
+  const [propView, setPropView] = useStateD('p0');
   const [sticky, setSticky] = useStateD(false);
   const titleSentinelRef = useRefD(null);
   useEffectD(() => {
@@ -1229,7 +1230,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
         {tab === 'quickuw' && window.QuickUnderwritingTab && <window.QuickUnderwritingTab deal={deal} set={set} />}
 
         {/* ===== FULL UNDERWRITING ===== */}
-        {tab === 'fulluw' && window.FullUnderwritingTab && <window.FullUnderwritingTab deal={deal} set={set} />}
+        {tab === 'fulluw' && window.FullUnderwritingTab && <window.FullUnderwritingTab deal={deal} set={set} propView={propView} setPropView={setPropView} />}
 
         {/* ===== RETURN METRICS ===== */}
         {tab === 'returns' && window.ReturnsTab && <window.ReturnsTab deal={deal} set={set} />}

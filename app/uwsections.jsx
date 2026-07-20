@@ -594,9 +594,8 @@ function PropertyFullUW({ property, onChange }) {
 }
 
 /* ───────────── Portfolio: Full UW tab wrapper ───────────── */
-function PortfolioUWTab({ deal, set }) {
+function PortfolioUWTab({ deal, set, view, setView }) {
   const props = deal.properties || [];
-  const [view, setView] = useSU('p0');
   const propSet = (idx) => (k, v) => {
     const arr = [...props];
     arr[idx] = { ...arr[idx], [k]: v };
@@ -614,9 +613,9 @@ function PortfolioUWTab({ deal, set }) {
   );
 }
 
-function FullUnderwritingTab({ deal, set }) {
+function FullUnderwritingTab({ deal, set, propView, setPropView }) {
   const isPortfolio = !!deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1;
-  if (isPortfolio) return <PortfolioUWTab deal={deal} set={set} />;
+  if (isPortfolio) return <PortfolioUWTab deal={deal} set={set} view={propView} setView={setPropView} />;
   const m = computeMetrics(deal);
   const uw = computeUW(deal);
   return (
