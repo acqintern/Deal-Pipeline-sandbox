@@ -127,7 +127,7 @@ function IncomeVacancySection({ deal, set }) {
   const stabOpex = stabOpexPerUnit * units;
   const stabNOI = stabEGI - stabOpex;
   const rpu = gpr > 0 ? gpr / units / 12 : 0;
-  const setComb = (v) => { set('concessions', v); set('badDebt', 0); };
+  const setComb = (v) => set({ concessions: v, badDebt: 0 });
 
   const panel = { background: 'var(--panel-2)', border: '1px solid var(--line)', borderRadius: 9, padding: '12px 14px' };
 
@@ -299,8 +299,8 @@ function AcqFinancingSection({ deal, set, uw }) {
     const s = SCENARIOS[label];
     if (!s) { set('acqFin', { ...fin, mode: 'new', scenario: 'Custom' }); return; }
     const next = { ...fin, mode: 'new', scenario: label, new: { ...s.loan } };
-    set('acqFin', next);
-    if (s.refi) set('refi', { ...(deal.refi || {}), ...s.refi });
+    if (s.refi) set({ acqFin: next, refi: { ...(deal.refi || {}), ...s.refi } });
+    else set('acqFin', next);
   };
 
   return (
@@ -608,7 +608,7 @@ function PortfolioUWTab({ deal, set, view, setView }) {
   const props = deal.properties || [];
   const propSet = (idx) => (k, v) => {
     const arr = [...props];
-    arr[idx] = { ...arr[idx], [k]: v };
+    arr[idx] = { ...arr[idx], ...(typeof k === 'object' ? k : { [k]: v }) };
     set('properties', arr);
   };
   const idx = view.startsWith('p') ? Number(view.slice(1)) : null;
@@ -617,7 +617,7 @@ function PortfolioUWTab({ deal, set, view, setView }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PropertyUWSwitcher props={props} view={view} setView={setView} />
       {safeIdx != null
-        ? <PropertyFullUW property={props[safeIdx]} onChange={propSet(safeIdx)} />
+        ? <PropertyFullUW key={props[safeIdx].id || safeIdx} property={props[safeIdx]} onChange={propSet(safeIdx)} />
         : <CombinedUWView deal={deal} />}
     </div>
   );

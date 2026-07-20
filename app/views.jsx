@@ -278,8 +278,12 @@ function windowMetrics(deals, days, endOffsetDays=0){
   const loiWonOffMarket = loiWon.filter(d=> d.offMarket);
   const loiWonOnMarket = loiWon.filter(d=> !d.offMarket);
   const sum = (arr,f)=> arr.reduce((s,d)=>s+(f(d)||0),0);
+  const uwPrice = (d)=> Array.isArray(d.properties) && d.isPortfolio && d.properties.length>1
+    ? d.properties.reduce((s,p)=>s+(Number(p.purchasePrice)||0),0)
+    : (Number(d.purchasePrice)||0);
   return {
     entered: entered.length,
+    dollarEntered: sum(entered, uwPrice),
     onMarket: onMarket.length,
     loiSubmitted: loiSub.length,
     loiSubmittedOnMarket: loiSubOnMarket.length,
@@ -337,11 +341,13 @@ function MetricsView({ deals, onOpen }){
       </div>
 
       {/* activity KPIs */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:14 }}>
         <Kpi label="On-Market Deals" value={fmtNum(cur.onMarket)} icon="plus" accent="#6b7a8d"
              delta={d(cur.onMarket,prev.onMarket)} sub={cur.entered ? fmtPct(cur.onMarket/cur.entered,0)+' of entered' : (isAll?'in pipeline':'vs prior '+rangeLabel)}/>
         <Kpi label="Off-Market Deals" value={fmtNum(cur.offMarket)} icon="lock" accent="var(--warn)"
              delta={d(cur.offMarket,prev.offMarket)} sub={cur.entered ? fmtPct(cur.offMarket/cur.entered,0)+' of entered' : 'sourced directly'}/>
+        <Kpi label="Total UW Price" value={fmtShort(cur.dollarEntered)} icon="dollar" accent="var(--ink)"
+             sub={fmtNum(cur.entered)+' deals entered'}/>
         <Kpi label="LOIs Submitted" value={fmtNum(cur.loiSubmitted)} icon="flag" accent="#bd7a16"
              delta={d(cur.loiSubmitted,prev.loiSubmitted)} sub={
                <span style={{ display:'flex', gap:6 }}>

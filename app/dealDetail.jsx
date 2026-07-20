@@ -581,24 +581,32 @@ function StageStepper({ stage, onChange }) {
 }
 
 /* full-bleed 5-up KPI strip + optional returns row */
-function KpiStrip({ deal, m }) {
+function KpiStrip({ deal, m, propView }) {
   const isPortfolio = !!deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1;
+  const selIdx = isPortfolio && propView && propView.startsWith('p') ? Number(propView.slice(1)) : null;
+  const selProperty = selIdx != null && deal.properties[selIdx] ? deal.properties[selIdx] : null;
+  const selM = selProperty ? computeMetrics(selProperty) : null;
   // Portfolios: sum per-property Full UW into the combined model (each property is
-  // underwritten independently). Single deals: Full UW (Yr1/Yr3 YOC) over Quick UW fallback.
-  const combined = isPortfolio && window.computeCombinedUW ? window.computeCombinedUW(deal) : null;
-  const fullUW = isPortfolio ? !!combined : (window.hasUWInputs ? window.hasUWInputs(deal) : false);
-  const uw = isPortfolio ? combined : (fullUW && window.computeUW ? window.computeUW(deal) : null);
+  // underwritten independently), or show one selected property's own Full UW.
+  // Single deals: Full UW (Yr1/Yr3 YOC) over Quick UW fallback.
+  const combined = isPortfolio && !selProperty && window.computeCombinedUW ? window.computeCombinedUW(deal) : null;
+  const selUw = selProperty && window.hasUWInputs && window.hasUWInputs(selProperty) && window.computeUW ? window.computeUW(selProperty) : null;
+  const fullUW = isPortfolio ? (selProperty ? !!selUw : !!combined) : (window.hasUWInputs ? window.hasUWInputs(deal) : false);
+  const uw = isPortfolio ? (selProperty ? selUw : combined) : (fullUW && window.computeUW ? window.computeUW(deal) : null);
   const y1 = uw && uw.rows[1] ? uw.rows[1].yieldOnCost : null;
   const y3row = uw ? (uw.rows[3] || uw.rows[uw.rows.length - 1]) : null;
   const y3 = y3row ? y3row.yieldOnCost : null;
 
-  const goingIn = uw && y1 != null ? y1 : m.goingInCap;
-  const stab = uw && y3 != null ? y3 : m.stabilizedCap;
+  const mBase = selProperty ? selM : m;
+  const goingIn = uw && y1 != null ? y1 : mBase.goingInCap;
+  const stab = uw && y3 != null ? y3 : mBase.stabilizedCap;
   const capSrc = uw ? 'Full UW' : 'Quick UW';
 
-  const askSum = isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.askPrice) || 0), 0) : deal.askPrice;
-  const uwSum = isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0) : deal.purchasePrice;
-  const totalBasis = isPortfolio && uw ? uw.basis : m.totalBasis;
+  const askSum = selProperty ? Number(selProperty.askPrice) || 0
+    : isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.askPrice) || 0), 0) : deal.askPrice;
+  const uwSum = selProperty ? Number(selProperty.purchasePrice) || 0
+    : isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0) : deal.purchasePrice;
+  const totalBasis = uw ? uw.basis : mBase.totalBasis;
 
   const priceCells = [
   { label: 'Ask Price', value: askSum ? fmtShort(askSum) : '—' },
@@ -618,18 +626,24 @@ function KpiStrip({ deal, m }) {
   const cells = [...priceCells, ...retCells];
 
   return (
-    <div style={{ display: 'flex', borderTop: '1px solid var(--line)', overflow: 'hidden' }}>
-      {cells.map((c, i) =>
-      <div key={i} style={{
-        flex: '1 1 0', minWidth: 0, padding: '11px 16px',
-        borderLeft: i === 0 ? 'none' : c.ret && !cells[i - 1].ret ? '2px solid var(--accent)' : '1px solid var(--line)',
-        background: c.ret ? 'var(--panel-2)' : 'transparent' }}>
-          <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}</div>
-          <div className="num" style={{ fontSize: 19, fontWeight: 700, lineHeight: 1, color: c.color || 'var(--ink)' }}>{c.value}</div>
-          {c.sub &&
-          <div style={{ fontSize: 9.5, fontWeight: 500, color: 'var(--faint)', marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.sub}</div>}
-        </div>
-      )}
+    <div>
+      {isPortfolio &&
+      <div style={{ padding: '8px 16px 0', fontSize: 11, fontWeight: 600, color: 'var(--muted)' }}>
+        Showing: <span style={{ color: 'var(--accent)' }}>{selProperty ? selProperty.name || 'Property ' + (selIdx + 1) : 'Combined (' + deal.properties.length + ')'}</span>
+      </div>}
+      <div style={{ display: 'flex', borderTop: '1px solid var(--line)', overflow: 'hidden' }}>
+        {cells.map((c, i) =>
+        <div key={i} style={{
+          flex: '1 1 0', minWidth: 0, padding: '11px 16px',
+          borderLeft: i === 0 ? 'none' : c.ret && !cells[i - 1].ret ? '2px solid var(--accent)' : '1px solid var(--line)',
+          background: c.ret ? 'var(--panel-2)' : 'transparent' }}>
+            <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}</div>
+            <div className="num" style={{ fontSize: 19, fontWeight: 700, lineHeight: 1, color: c.color || 'var(--ink)' }}>{c.value}</div>
+            {c.sub &&
+            <div style={{ fontSize: 9.5, fontWeight: 500, color: 'var(--faint)', marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.sub}</div>}
+          </div>
+        )}
+      </div>
     </div>);
 
 }
@@ -865,7 +879,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   onRunMarketReview, onRunMemo,
   todos, onAddTodo, onPatchTodo, onDeleteTodo, onViewTasks }) {
   const [tab, setTab] = useStateD('summary');
-  const [propView, setPropView] = useStateD('p0');
+  const [propView, setPropView] = useStateD('combined');
   const [sticky, setSticky] = useStateD(false);
   const titleSentinelRef = useRefD(null);
   useEffectD(() => {
@@ -875,7 +889,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
-  const set = (k, v) => onPatch(deal.id, { [k]: v });
+  const set = (k, v) => onPatch(deal.id, typeof k === 'object' ? k : { [k]: v });
   const patch = (obj) => onPatch(deal.id, obj);
   const makeProperty = (i) => ({ id: 'p' + Date.now() + '_' + i, name: 'Property ' + (i + 1),
     market: deal.market || '', units: '', vintage: '', askPrice: '', purchasePrice: '', notes: '' });
@@ -1029,7 +1043,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
         </div>
 
         {/* KPI strip */}
-        <KpiStrip deal={deal} m={m} />
+        <KpiStrip deal={deal} m={m} propView={propView} />
 
         {/* tabs */}
         <DetailTabs tab={tab} setTab={setTab} showProperties={!!deal.isPortfolio} />
