@@ -34,13 +34,21 @@ function loadDeals() {
 // reconfiguration — production uses the hosted endpoint, preview uses claude directly.
 async function aiComplete(prompt, opts) {
   const maxTokens = (opts && opts.maxTokens) || 4096;
+  const callClaude = () => window.claude.complete(prompt, { maxTokens });
   if (window.ALTUS_AI && typeof window.ALTUS_AI.complete === 'function') {
     try { return await window.ALTUS_AI.complete(prompt, maxTokens); } catch (e) {
       if (!(window.claude && typeof window.claude.complete === 'function')) throw e;
       // fall through to window.claude when the hosted endpoint isn't reachable
     }
   }
-  if (window.claude && typeof window.claude.complete === 'function') return window.claude.complete(prompt, { maxTokens });
+  if (window.claude && typeof window.claude.complete === 'function') {
+    // A "no data for Ns" error is a transient stall, not a bad document — retry once.
+    try { return await callClaude(); }
+    catch (e) {
+      if (!/no data for/i.test(String(e && e.message || e))) throw e;
+      return await callClaude();
+    }
+  }
   throw new Error('AI is not connected — wire up ALTUS_AI in supabase-config.js or open in the Design Canvas.');
 }
 
@@ -2076,7 +2084,7 @@ function parseRentRollTabular(text){
     if(unitIdx>=0 && marketIdx>=0 && rentIdx>=0){ hi=i; cols={unitIdx,marketIdx,rentIdx,statusIdx}; break; }
   }
   if(hi<0) return null;
-  let totalUnits=0, vacantUnits=0, mAll=0, mInH=0, mVac=0;
+  let totalUnits=0, vacantUnits=0, mAll=0, mInH=0, ltlSum=0;
   const vacantUnitList = [];
   const seenUnits = new Set(); // dedupe charge-code rows (multiple rows per unit)
   for(let i=hi+1;i<rows.length;i++){
@@ -2103,15 +2111,20 @@ function parseRentRollTabular(text){
     const isVac = statusKnown
       ? (/vacant/i.test(status) && !preLeased) || (status==='' && (rent==null || rent===0))
       : (rent==null || rent===0);
-    if(isVac){ vacantUnits++; if(market!=null) mVac += market; vacantUnitList.push(unit); }
-    else if(rent!=null){ mInH += rent; }
+    if(isVac){ vacantUnits++; vacantUnitList.push(unit); }
+    else if(rent!=null){
+      mInH += rent;
+      // Loss to lease is per-unit: market minus current, floored at 0 (an in-place
+      // lease ABOVE market contributes nothing, never a negative offset).
+      if(market!=null) ltlSum += Math.max(0, market - rent);
+    }
   }
   if(totalUnits < 1) return null;
   return {
     totalUnits, vacantUnits,
     marketRentMonthlyAll: Math.round(mAll),
     inHouseRentMonthlyOccupied: Math.round(mInH),
-    marketRentMonthlyVacant: Math.round(mVac),
+    lossToLeaseMonthly: Math.round(ltlSum),
     vacantUnitList,
     notes: `Parsed ${totalUnits} units directly from the rent-roll table.`
   };
@@ -2804,9 +2817,13 @@ Do not include any text outside the JSON object.`;
   "vacantUnits": 0,
   "marketRentMonthlyAll": 0,
   "inHouseRentMonthlyOccupied": 0,
-  "marketRentMonthlyVacant": 0
+  "lossToLeaseMonthly": 0
 }
-Definitions: marketRentMonthlyAll = sum of the MARKET / GROSS-POTENTIAL rent column over ALL units. marketRentMonthlyVacant = sum of MARKET rent for units whose status is VACANT (not pre-leased / not on notice). inHouseRentMonthlyOccupied = sum of the ACTUAL / LEASE / current rent column for OCCUPIED units only. A unit on Notice or in Eviction is OCCUPIED. Numbers only, no $ or commas.
+Definitions:
+marketRentMonthlyAll = sum of the MARKET / GROSS-POTENTIAL rent column over ALL units (occupied + vacant). If the roll gives only a per-unit market-rent AVERAGE instead of a full column, multiply that average by totalUnits. If the roll shows both a stated market-rent total AND a per-unit figure that would compute to a different total, use whichever is LARGER.
+inHouseRentMonthlyOccupied = sum of the ACTUAL / LEASE / current rent column for OCCUPIED units only. A unit on Notice or in Eviction is OCCUPIED.
+lossToLeaseMonthly = for EACH occupied unit, take (market rent − current rent); if the current rent is HIGHER than market for that unit, use 0 for it (never negative); SUM this per-unit amount across every occupied unit. Do not net it against units where current exceeds market.
+Numbers only, no $ or commas.
 
 RENT ROLL:
 ${excerpt}`;
@@ -2815,16 +2832,19 @@ ${excerpt}`;
       }
       if (!agg || !agg.totalUnits) throw new Error('No unit rows could be read from this rent roll.');
       const mAll = Number(agg.marketRentMonthlyAll) || 0;
-      const mVac = Number(agg.marketRentMonthlyVacant) || 0;
       const mInH = Number(agg.inHouseRentMonthlyOccupied) || 0;
-      const occMarket = Math.max(0, mAll - mVac);
+      const vacant = Number(agg.vacantUnits) || 0;
+      const occUnits = Math.max(0, (Number(agg.totalUnits) || 0) - vacant);
+      // Average CURRENT rent across OCCUPIED units only — including vacant units (which
+      // read $0) in this average would understate it and skew the vacancy-loss estimate.
+      const avgOccCurrentRent = occUnits > 0 ? mInH / occUnits : 0;
       const parsed = {
         totalUnits: agg.totalUnits,
-        vacantUnits: agg.vacantUnits || 0,
+        vacantUnits: vacant,
         units: agg.totalUnits,
         gprAnnual: Math.round(mAll * 12),
-        physVacLoss: Math.round(mVac * 12),
-        lossToLease: Math.round(Math.max(0, occMarket - mInH) * 12),
+        physVacLoss: Math.round(avgOccCurrentRent * vacant * 12),
+        lossToLease: Math.round((Number(agg.lossToLeaseMonthly) || 0) * 12),
       };
       setRRMap((m) => ({ ...m, [dealId]: { status: 'done', fileName: file.name, parsed } }));
       setOpenId(dealId);

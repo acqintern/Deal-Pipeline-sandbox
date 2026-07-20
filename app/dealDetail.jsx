@@ -326,7 +326,7 @@ function BrokerCallLog({ deal, contacts, onPatch }) {
   const cancelEdit = () => { setEditId(null); setEditDraft(null); };
 
   const exportXLSX = () => {
-    if (!window.XLSX || !log.length) return;
+    if (!log.length) return;
     const rows = log.map((e) => {
       const parts = (e.brokerName || '').trim().split(/\s+/);
       return {
@@ -340,10 +340,7 @@ function BrokerCallLog({ deal, contacts, onPatch }) {
         'Call Date': e.ts ? fmtDate(e.ts) : '',
       };
     });
-    const ws = window.XLSX.utils.json_to_sheet(rows);
-    const wb = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(wb, ws, 'Call Log');
-    window.XLSX.writeFile(wb, deal.name.replace(/[^a-z0-9]+/gi, '_') + '_call_log.xlsx');
+    window.downloadCSV(rows, deal.name.replace(/[^a-z0-9]+/gi, '_') + '_call_log.csv');
   };
 
   const inputStyle = { width: '100%', boxSizing: 'border-box', border: '1px solid var(--line-2)', borderRadius: 7,
@@ -357,7 +354,7 @@ function BrokerCallLog({ deal, contacts, onPatch }) {
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--ink)' }}>Broker Call Log</span>
           <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>logged calls for {deal.name}</span>
         </div>
-        <button onClick={exportXLSX} disabled={!log.length} title="Export as Excel for GoHighLevel import"
+        <button onClick={exportXLSX} disabled={!log.length} title="Export as CSV for GoHighLevel import"
           style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--line-2)', borderRadius: 7,
             padding: '5px 10px', background: 'var(--panel)', fontSize: 12, fontWeight: 600,
             color: log.length ? 'var(--slate)' : 'var(--faint)', cursor: log.length ? 'pointer' : 'default' }}>

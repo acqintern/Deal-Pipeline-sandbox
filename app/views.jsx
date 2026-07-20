@@ -471,11 +471,7 @@ function BrokerCallsView({ deals, onOpen }){
   });
 
   const doExport = (rows, filename) => {
-    if (!window.XLSX || !rows.length) return;
-    const ws = window.XLSX.utils.json_to_sheet(exportRows(rows));
-    const wb = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(wb, ws, 'Broker Calls');
-    window.XLSX.writeFile(wb, filename);
+    window.downloadCSV(exportRows(rows), filename);
   };
 
   return (
@@ -487,13 +483,13 @@ function BrokerCallsView({ deals, onOpen }){
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
           <Seg value={days} onChange={setDays} options={RANGES}/>
-          <button onClick={() => doExport(inRange, 'broker_calls_' + (isAll?'all':days+'d') + '.xlsx')} disabled={!inRange.length}
+          <button onClick={() => doExport(inRange, 'broker_calls_' + (isAll?'all':days+'d') + '.csv')} disabled={!inRange.length}
             style={{ display:'inline-flex', alignItems:'center', gap:6, height:36, padding:'0 14px', border:'1px solid var(--line-2)',
               borderRadius:8, background:'var(--panel)', fontSize:12.5, fontWeight:600,
               color:inRange.length?'var(--slate)':'var(--faint)', cursor:inRange.length?'pointer':'default' }}>
             <Icon name="download" size={13}/> Export {isAll?'All':'Range'}
           </button>
-          {!isAll && <button onClick={() => doExport(allCalls, 'broker_calls_all.xlsx')} disabled={!allCalls.length}
+          {!isAll && <button onClick={() => doExport(allCalls, 'broker_calls_all.csv')} disabled={!allCalls.length}
             style={{ display:'inline-flex', alignItems:'center', gap:6, height:36, padding:'0 14px', border:'1px solid var(--line-2)',
               borderRadius:8, background:'var(--panel)', fontSize:12.5, fontWeight:600,
               color:allCalls.length?'var(--slate)':'var(--faint)', cursor:allCalls.length?'pointer':'default' }}>

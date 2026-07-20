@@ -180,10 +180,11 @@ function OffMarketToggle({ on, onToggle, size = 17 }) {
   return (
     <button onClick={(e) => { e.stopPropagation(); onToggle(); }}
       title={on ? 'Off-market — click to unmark' : 'Mark as off-market'}
-      style={{ border: 'none', background: 'none', padding: '3px 7px', cursor: 'pointer', display: 'inline-flex',
+      style={{ border: '1px solid ' + (on ? 'var(--warn)' : 'var(--line-2)'), borderRadius: 999,
+        background: on ? 'var(--warn-soft)' : 'var(--panel)', padding: '3px 8px', cursor: 'pointer', display: 'inline-flex',
         alignItems: 'center', justifyContent: 'center', textAlign: 'center', flex: 'none', lineHeight: 1,
         fontSize: Math.round(size * 0.62), fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
-        color: on ? 'var(--warn)' : 'var(--faint)' }}>
+        color: on ? 'var(--warn)' : 'var(--slate)' }}>
       Off Market
     </button>
   );
@@ -377,10 +378,32 @@ function AssigneePicker({ value, onChange, size = 24 }) {
   );
 }
 
+// GoHighLevel's bulk importer only accepts .csv (not .xlsx) — shared exporter for any
+// GHL-bound download (broker call log, etc).
+function rowsToCSV(rows) {
+  if (!rows.length) return '';
+  const headers = Object.keys(rows[0]);
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  return [headers.join(','), ...rows.map((r) => headers.map((h) => esc(r[h])).join(','))].join('\r\n');
+}
+function downloadCSV(rows, filename) {
+  if (!rows.length) return;
+  const blob = new Blob([rowsToCSV(rows)], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 Object.assign(window, {
   TODAY, DAY, parseD, daysAgo, fmtMoney, fmtShort, fmtPct, fmtNum, fmtDate, fmtDateShort, fmtRelative, lastActivityOf,
   STAGES, STAGE_ALL, STAGE_META, PIPELINE_STAGES, LOI_STAGES,
   normalizeStage, isPipelineStage, isLOIStage, isDeadStage,
   TYPE_META, computeMetrics, ASSIGNEES, ASSIGNEE_COLOR, AssigneePicker,
   Icon, StageBadge, StageBadgeSolid, TypeTag, OffMarketTag, OffMarketToggle, Avatar, Delta, Kpi, Seg, Bar, Donut, Card,
+  downloadCSV,
 });

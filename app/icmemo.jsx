@@ -203,9 +203,9 @@ function ScenarioAnalysis({ deal, uw }) {
   const hasLP = scenarios.some(s => s.r && s.r.lpIRR != null);
   const hasGP = scenarios.some(s => s.r && s.r.gpPromote != null);
 
-  const scColors = [IC.neg, IC.navy, IC.pos];
-  const irrColor = (r) => r&&r.dealIRR!=null ? (r.dealIRR>=.18?IC.pos:r.dealIRR<.12?IC.neg:IC.warn) : IC.navy;
-  const lpIrrColor = (r) => r&&r.lpIRR!=null ? (r.lpIRR>=.15?IC.pos:r.lpIRR<.1?IC.neg:IC.warn) : IC.navy;
+  const scColors = [IC.navy, IC.navy, IC.navy];
+  const irrColor = () => IC.navy;
+  const lpIrrColor = () => IC.navy;
 
   const ROWS = [
     { type:'section', label:'DEAL & LP RETURNS' },
@@ -271,12 +271,10 @@ function ReturnSummaryPanel({ uw, lp, caps }) {
   if (!uw) return (
     <div style={{ padding:'8px 11px', fontSize:9.5, color:IC.faint, fontStyle:'italic' }}>No UW data.</div>
   );
-  const irrColor   = uw.irr!=null?(uw.irr>=.18?IC.pos:uw.irr<.12?IC.neg:IC.warn):IC.faint;
-  const lpIrrColor = lp&&lp.lpIRR!=null?(lp.lpIRR>=.15?IC.pos:lp.lpIRR<.1?IC.neg:IC.warn):IC.faint;
   const lpProfit = lp ? (lp.lpDistTotal-lp.LPcap) : null;
   const rows = [
-    ['Deal IRR', _p(uw.irr), true, false, irrColor],
-    ['LP IRR', lp?_p(lp.lpIRR):'—', true, false, lpIrrColor],
+    ['Deal IRR', _p(uw.irr), true, false],
+    ['LP IRR', lp?_p(lp.lpIRR):'—', true, false],
     ['Deal Equity Multiple', _x(uw.equityMultiple), false, true],
     ['LP Equity Multiple', lp?_x(lp.lpMultiple):'—'],
     ['Deal Avg Yield', _p(uw.avgYield), false, true],
@@ -326,9 +324,9 @@ function UWAssumptions({ uw }) {
 function OperatingForecast({ uw }) {
   if (!uw||!uw.rows) return null;
   const maxY = Math.min(uw.hold, 5);
-  const curNOI = uw.egi0 - ((uw.rows[1]&&uw.rows[1].opex!=null)?uw.rows[1].opex:uw.opexBase);
+  const curNOI = uw.rows[0].noi;
   const cols = [{ label:'Current', noi:curNOI, netIncome:uw.rows[0].netIncome, cashOnCash:uw.rows[0].cashOnCash,
-    yieldOnCost:uw.basis>0?curNOI/uw.basis:null, dscr:uw.rows[0].dscr, vac:uw.inPlaceEconVac, stab:false, isCur:true }];
+    yieldOnCost:uw.rows[0].yieldOnCost, dscr:uw.rows[0].dscr, vac:uw.inPlaceEconVac, stab:false, isCur:true }];
   for (let y=1; y<=maxY; y++) {
     const row=uw.rows[y]; if(!row) continue;
     cols.push({ label:'Y'+y, noi:row.noi, netIncome:row.netIncome, cashOnCash:row.cashOnCash, yieldOnCost:row.yieldOnCost,
@@ -367,7 +365,7 @@ function OperatingForecast({ uw }) {
               <td key={r.label} style={{ textAlign:'right', fontVariantNumeric:'tabular-nums',
                 padding:'4px 7px', borderBottom:'1px solid '+IC.line2,
                 fontSize:m.bold?12:11, fontWeight:m.bold?700:500,
-                color:r.stab?IC.pos:IC.navy }}>
+                color:IC.navy }}>
                 {m.fmt(r,i)}
               </td>
             ))}
@@ -388,24 +386,21 @@ function ICMemoPage2({ deal, mr }) {
   const gradeColor = (sub.overallGrade||'').startsWith('A')?IC.pos:(sub.overallGrade||'').startsWith('B')?IC.blue:(sub.overallGrade||'').startsWith('C')?IC.warn:IC.faint;
 
   return (
-    <div id="ic-memo-page2" style={{ width:1020, background:IC.bg, color:IC.navy,
-      fontFamily:IC.sans, WebkitFontSmoothing:'antialiased' }}>
-      <div style={{ background:IC.navy, padding:'7px 18px 8px', display:'flex',
-        alignItems:'center', justifyContent:'space-between', gap:16 }}>
+    <div id="ic-memo-page2" style={{ width:1020, height:1320, boxSizing:'border-box', overflow:'hidden',
+      background:IC.bg, color:IC.navy, fontFamily:IC.sans, WebkitFontSmoothing:'antialiased' }}>
+      <div style={{ padding:'14px 24px 12px', borderBottom:'2px solid '+IC.navy, background:'#fff',
+        display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16 }}>
         <div>
           <div style={{ fontSize:9.5, letterSpacing:'.1em', textTransform:'uppercase',
-            color:'rgba(255,255,255,.42)', fontWeight:500, marginBottom:2 }}>
-            Altus Equity – Investment Committee Memo – Confidential
+            color:IC.faint, fontWeight:600, marginBottom:3 }}>
+            Altus Equity — Investment Committee Memo — Confidential
           </div>
-          <div style={{ fontSize:20, fontWeight:700, color:'#fff', lineHeight:1.05, fontFamily:IC.serif }}>
+          <div style={{ fontSize:19, fontWeight:700, color:IC.navy, lineHeight:1.15, fontFamily:IC.serif }}>
             Submarket & Location Review — {deal.name||'Untitled Deal'}
           </div>
         </div>
         {sub.overallGrade && (
-          <div style={{ display:'inline-flex', alignItems:'center', gap:7, border:'1.5px solid '+IC.gold,
-            borderRadius:4, padding:'5px 12px', color:IC.gold, fontSize:13, fontWeight:700, whiteSpace:'nowrap' }}>
-            Submarket Grade: {sub.overallGrade}
-          </div>
+          <div style={{ fontSize:11, color:IC.muted, whiteSpace:'nowrap' }}>Submarket Grade: <strong style={{ color:IC.navy }}>{sub.overallGrade}</strong></div>
         )}
       </div>
 
@@ -520,32 +515,21 @@ function ICMemoSheet({ deal }) {
   const emColor  = em!=null?(em>=2?IC.pos:em<1.5?IC.neg:IC.warn):IC.faint;
 
   return (
-    <div id="ic-memo-sheet" style={{ width:1020, background:IC.bg, color:IC.navy,
-      fontFamily:IC.sans, WebkitFontSmoothing:'antialiased' }}>
+    <div id="ic-memo-sheet" style={{ width:1020, height:1320, boxSizing:'border-box', overflow:'hidden',
+      background:IC.bg, color:IC.navy, fontFamily:IC.sans, WebkitFontSmoothing:'antialiased' }}>
 
       {/* ── HEADER ── */}
-      <div style={{ background:IC.navy, padding:'7px 18px 8px', display:'flex',
-        alignItems:'center', justifyContent:'space-between', gap:16 }}>
+      <div style={{ padding:'14px 24px 12px', borderBottom:'2px solid '+IC.navy, background:'#fff',
+        display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16 }}>
         <div>
           <div style={{ fontSize:9.5, letterSpacing:'.1em', textTransform:'uppercase',
-            color:'rgba(255,255,255,.42)', fontWeight:500, marginBottom:2 }}>
+            color:IC.faint, fontWeight:600, marginBottom:3 }}>
             Altus Equity – Investment Committee Memo – Confidential
           </div>
-          <div style={{ fontSize:26, fontWeight:700, color:'#fff', lineHeight:1.05,
+          <div style={{ fontSize:26, fontWeight:700, color:IC.navy, lineHeight:1.05,
             fontFamily:IC.serif }}>{deal.name||'Untitled Deal'}</div>
         </div>
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
-          <div style={{ display:'inline-flex', alignItems:'center', gap:7,
-            border:'1.5px solid '+IC.gold, borderRadius:4, padding:'5px 10px',
-            color:IC.gold, fontSize:11, fontWeight:600, letterSpacing:'.02em', whiteSpace:'nowrap' }}>
-            <svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="currentColor"
-              strokeWidth="1.5" strokeLinejoin="round">
-              <path d="M7.5 1.5L13 3.5V8.5C13 11.5 10.5 13.6 7.5 14.5C4.5 13.6 2 11.5 2 8.5V3.5Z"/>
-              <polyline points="5,7.5 6.5,9 10,5.5"/>
-            </svg>
-            {statusLabel} – IC Review
-          </div>
-        </div>
+        <div style={{ fontSize:11, color:IC.muted, whiteSpace:'nowrap' }}>{todayStr}</div>
       </div>
 
       {/* ── BODY ── */}
@@ -565,8 +549,7 @@ function ICMemoSheet({ deal }) {
               ['Year Built',      deal.vintage||'—'],
               ['Physical Vacancy', uw&&uw.gpr0>0?_p(uw.physVac/uw.gpr0):'—'],
               ['Loss to Lease',   uw&&uw.gpr0>0?_p(uw.ltl/uw.gpr0):'—'],
-              ['Bad Debt',        uw&&uw.gpr0>0?_p(uw.badDebt/uw.gpr0):'—'],
-              ['Concessions',     uw&&uw.gpr0>0?_p(uw.concessions/uw.gpr0):'—'],
+              ['Bad Debt & Concessions', uw&&uw.gpr0>0?_p((uw.badDebt+uw.concessions)/uw.gpr0):'—'],
               ['Econ. Vacancy',   uw?_p(uw.inPlaceEconVac):'—', false, true],
             ].map(([lbl,val,s,sep])=><DR key={lbl} label={lbl} value={val} strong={!!s} sep={!!sep} />)}
           </div>
