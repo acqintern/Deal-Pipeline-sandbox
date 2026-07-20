@@ -565,10 +565,11 @@ function CombinedUWView({ deal }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
         <SectionHead icon="chart" title="Combined Portfolio" desc={uwCount + ' of ' + props.length + ' properties underwritten · summed cash flows, IRR from the combined stream'} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginTop: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginTop: 14 }}>
           <GuidancePill label="Total Basis" value={moneyFull(uw.basis)} sub={uw.units ? moneyFull(uw.basis / uw.units) + ' / unit' : ''} />
           <GuidancePill label="Equity Required" value={moneyFull(uw.initialEquity)} />
           <GuidancePill label="Equity Multiple" value={uw.equityMultiple != null ? uw.equityMultiple.toFixed(2) + 'x' : '—'} />
+          <GuidancePill label="Avg Yield" value={uw.avgYield != null ? (uw.avgYield * 100).toFixed(1) + '%' : '—'} />
           <GuidancePill label="Levered IRR" value={uw.irr != null ? (uw.irr * 100).toFixed(1) + '%' : '—'} accent={uw.irr != null ? 'var(--pos)' : 'var(--faint)'} />
         </div>
       </Card>
@@ -581,8 +582,17 @@ function CombinedUWView({ deal }) {
 function PropertyFullUW({ property, onChange }) {
   const m = computeMetrics(property);
   const uw = computeUW(property);
+  const hasReturns = window.hasUWInputs ? window.hasUWInputs(property) : true;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <SectionHead icon="chart" title="Property Returns" desc="Levered returns for this property alone, independent of the rest of the portfolio." />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginTop: 14 }}>
+          <GuidancePill label="Levered IRR" value={hasReturns && uw.irr != null ? (uw.irr * 100).toFixed(1) + '%' : '—'} accent={hasReturns && uw.irr != null ? 'var(--pos)' : 'var(--faint)'} />
+          <GuidancePill label="Equity Multiple" value={hasReturns && uw.equityMultiple != null ? uw.equityMultiple.toFixed(2) + 'x' : '—'} />
+          <GuidancePill label="Avg Yield" value={hasReturns && uw.avgYield != null ? (uw.avgYield * 100).toFixed(1) + '%' : '—'} />
+        </div>
+      </Card>
       <PricingBasis deal={property} set={onChange} m={m} />
       <IncomeVacancySection deal={property} set={onChange} />
       <AcqFinancingSection deal={property} set={onChange} uw={uw} />
