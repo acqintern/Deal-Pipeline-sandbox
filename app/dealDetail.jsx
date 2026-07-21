@@ -205,9 +205,10 @@ function ParseErrorBanner({ label, error }) {
 }
 
 /* ── OM Parsed Results Banner ── */
-function OMParsedSection({ parsed, deal, onAccept }) {
+function OMParsedSection({ parsed, deal, properties, targetIdx, setTargetIdx, onAccept }) {
   const [dismissed, setDismissed] = useStateD(false);
   if (dismissed) return null;
+  const isPortfolio = deal.isPortfolio && Array.isArray(properties) && properties.length > 1;
 
   const _rawC = Array.isArray(parsed.brokerContacts) ? parsed.brokerContacts :
   Array.isArray(parsed.isrContacts) ? parsed.isrContacts : [];
@@ -251,6 +252,18 @@ function OMParsedSection({ parsed, deal, onAccept }) {
     <BannerShell title="OM Parsed"
     sub={`${foundCount} of ${totalFields} fields extracted${foundCount < totalFields ? ` · ${totalFields - foundCount} need manual entry` : ''}`}
     canApply={foundCount > 0} onApplyAll={acceptAll} onDismiss={() => setDismissed(true)}>
+      {isPortfolio &&
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Apply to:</span>
+        {properties.map((p, i) =>
+        <button key={p.id || i} onClick={() => setTargetIdx(i)}
+        style={{ border: '1px solid ' + (i === targetIdx ? 'var(--accent)' : 'var(--line-2)'), background: i === targetIdx ? 'var(--accent-soft)' : 'var(--panel)',
+          color: i === targetIdx ? 'var(--accent)' : 'var(--ink)', borderRadius: 6, padding: '3px 9px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>
+          {p.name || 'Property ' + (i + 1)}
+        </button>
+        )}
+      </div>
+      }
       {found.map((f) =>
       <FoundRow key={f.key} label={f.label}
       display={f.fmt ? f.fmt(parsed[f.key]) : String(parsed[f.key])}
@@ -880,6 +893,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   todos, onAddTodo, onPatchTodo, onDeleteTodo, onViewTasks }) {
   const [tab, setTab] = useStateD('summary');
   const [propView, setPropView] = useStateD('combined');
+  const [omTargetIdx, setOmTargetIdx] = useStateD(0);
   const [sticky, setSticky] = useStateD(false);
   const titleSentinelRef = useRefD(null);
   useEffectD(() => {
@@ -1066,9 +1080,17 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
         {(anyParsed || anyError) &&
         <div style={{ marginBottom: 18 }}>
             {omData?.status === 'done' && omData.parsed &&
-          <OMParsedSection parsed={omData.parsed} deal={deal}
+          <OMParsedSection parsed={omData.parsed} deal={deal} properties={properties} targetIdx={omTargetIdx} setTargetIdx={setOmTargetIdx}
           onReupload={onClearOM ? () => onClearOM(deal.id) : null}
-          onAccept={(fields) => onAcceptOM && onAcceptOM(deal.id, fields)} />
+          onAccept={(fields) => {
+            if (deal.isPortfolio && properties.length) {
+              const arr = [...properties];
+              arr[omTargetIdx] = { ...arr[omTargetIdx], ...fields };
+              patch(rollupProperties(arr));
+            } else {
+              onAcceptOM && onAcceptOM(deal.id, fields);
+            }
+          }} />
           }
             {t12Data?.status === 'done' && t12Data.parsed && T12Banner &&
           <T12Banner parsed={t12Data.parsed}
@@ -1197,6 +1219,16 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
               )}
 
               <PanelCard title="Notes" hint="UW thoughts, broker feedback, pricing guidance">
+                {deal.isPortfolio && properties.length > 0 &&
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  {properties.filter((p) => p.notes).map((p, i) =>
+                  <div key={p.id || i} style={{ fontSize: 12.5, background: 'var(--panel-2)', borderRadius: 7, padding: '8px 10px' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{p.name || 'Property ' + (i + 1)}: </span>
+                    <span style={{ color: 'var(--muted)' }}>{p.notes}</span>
+                  </div>
+                  )}
+                </div>
+                }
                 <NotesEditor value={deal.notes} onChange={(v) => set('notes', v)} />
               </PanelCard>
 
@@ -1254,7 +1286,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
         {tab === 'quickuw' && window.QuickUnderwritingTab && <window.QuickUnderwritingTab deal={deal} set={set} />}
 
         {/* ===== FULL UNDERWRITING ===== */}
-        {tab === 'fulluw' && window.FullUnderwritingTab && <window.FullUnderwritingTab deal={deal} set={set} propView={propView} setPropView={setPropView} />}
+        {tab === 'fulluw' && window.FullUnderwritingTab && <window.FullUnderwritingTab deal={deal} set={set} propView={propView} setPropView={setPropView} setProperties={(arr) => patch(rollupProperties(arr))} />}
 
         {/* ===== RETURN METRICS ===== */}
         {tab === 'returns' && window.ReturnsTab && <window.ReturnsTab deal={deal} set={set} />}

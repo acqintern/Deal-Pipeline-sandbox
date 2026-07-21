@@ -557,7 +557,7 @@ function PropertyUWSwitcher({ props, view, setView }) {
 }
 
 /* ───────────── Portfolio: combined read-only rollup ───────────── */
-function CombinedUWView({ deal }) {
+function CombinedUWView({ deal, set }) {
   const uw = window.computeCombinedUW ? window.computeCombinedUW(deal) : null;
   const props = deal.properties || [];
   const uwCount = props.filter((p) => window.hasUWInputs && window.hasUWInputs(p)).length;
@@ -578,9 +578,17 @@ function CombinedUWView({ deal }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
         <SectionHead icon="chart" title="Combined Portfolio" desc={uwCount + ' of ' + props.length + ' properties underwritten · summed cash flows, IRR from the combined stream'} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 14, marginTop: 14 }}>
-          <GuidancePill label="Units" value={totalUnits ? fmtNum(totalUnits) : '—'} />
-          <GuidancePill label="Vintage" value={vintageRange} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14, marginTop: 14 }}>
+          <div><Lbl>Units</Lbl><FieldInput value={deal.units || totalUnits} onChange={(v) => set('units', Number(v) || 0)} align="left" /></div>
+          <div><Lbl>Vintage</Lbl>
+            <input value={deal.vintage || vintageRange} onChange={(e) => set('vintage', e.target.value)} placeholder="Year built"
+              style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+                fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
+              onFocus={(e) => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)'; }}
+              onBlur={(e) => { e.target.style.borderColor = 'var(--line-2)'; e.target.style.boxShadow = 'none'; }} />
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginTop: 12 }}>
           <GuidancePill label="Total Basis" value={moneyFull(uw.basis)} sub={uw.units ? moneyFull(uw.basis / uw.units) + ' / unit' : ''} />
           <GuidancePill label="Equity Required" value={moneyFull(uw.initialEquity)} />
           <GuidancePill label="Equity Multiple" value={uw.equityMultiple != null ? uw.equityMultiple.toFixed(2) + 'x' : '—'} />
@@ -618,33 +626,52 @@ function PropertyFullUW({ property, onChange }) {
   );
 }
 
+function MiniNotes({ deal, set }) {
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Notes</div>
+        <div style={{ fontSize: 10.5, color: 'var(--faint)' }}>Synced with Summary &amp; Notes tabs</div>
+      </div>
+      <textarea value={deal.notes || ''} onChange={(e) => set('notes', e.target.value)}
+        placeholder="Add notes — underwriting rationale, broker conversations, pricing guidance, next steps…"
+        style={{ width: '100%', minHeight: 60, resize: 'vertical', border: '1px solid var(--line-2)', borderRadius: 7,
+          padding: '8px 10px', background: 'var(--panel)', fontSize: 12.5, color: 'var(--ink)', fontFamily: 'var(--font)', boxSizing: 'border-box' }}
+        onFocus={(e) => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)'; }}
+        onBlur={(e) => { e.target.style.borderColor = 'var(--line-2)'; e.target.style.boxShadow = 'none'; }} />
+    </Card>
+  );
+}
+
 /* ───────────── Portfolio: Full UW tab wrapper ───────────── */
-function PortfolioUWTab({ deal, set, view, setView }) {
+function PortfolioUWTab({ deal, set, view, setView, setProperties }) {
   const props = deal.properties || [];
   const propSet = (idx) => (k, v) => {
     const arr = [...props];
     arr[idx] = { ...arr[idx], ...(typeof k === 'object' ? k : { [k]: v }) };
-    set('properties', arr);
+    if (setProperties) setProperties(arr); else set('properties', arr);
   };
   const idx = view.startsWith('p') ? Number(view.slice(1)) : null;
   const safeIdx = idx != null && props[idx] ? idx : null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <MiniNotes deal={deal} set={set} />
       <PropertyUWSwitcher props={props} view={view} setView={setView} />
       {safeIdx != null
         ? <PropertyFullUW key={props[safeIdx].id || safeIdx} property={props[safeIdx]} onChange={propSet(safeIdx)} />
-        : <CombinedUWView deal={deal} />}
+        : <CombinedUWView deal={deal} set={set} />}
     </div>
   );
 }
 
-function FullUnderwritingTab({ deal, set, propView, setPropView }) {
+function FullUnderwritingTab({ deal, set, propView, setPropView, setProperties }) {
   const isPortfolio = !!deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1;
-  if (isPortfolio) return <PortfolioUWTab deal={deal} set={set} view={propView} setView={setPropView} />;
+  if (isPortfolio) return <PortfolioUWTab deal={deal} set={set} view={propView} setView={setPropView} setProperties={setProperties} />;
   const m = computeMetrics(deal);
   const uw = computeUW(deal);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <MiniNotes deal={deal} set={set} />
       <PricingBasis deal={deal} set={set} m={m} />
       <IncomeVacancySection deal={deal} set={set} />
       <AcqFinancingSection deal={deal} set={set} uw={uw} />
