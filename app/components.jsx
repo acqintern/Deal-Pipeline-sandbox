@@ -84,6 +84,22 @@ const TYPE_META = {
 /* ============================ Metric math ============================ */
 // Per Garrett's spec — Going-In and Stabilized (Pro Forma) cap rates.
 function computeMetrics(d){
+  // Portfolios: quick-UW fields live per-property, not on the deal — sum them so the
+  // Quick UW fallback (when Full UW isn't entered yet) still produces sane numbers.
+  if (d && d.isPortfolio && Array.isArray(d.properties) && d.properties.length > 1) {
+    const props = d.properties;
+    d = {
+      units: props.reduce((s,p)=>s+(Number(p.units)||0),0),
+      purchasePrice: props.reduce((s,p)=>s+(Number(p.purchasePrice)||0),0),
+      capex: props.reduce((s,p)=>s+(Number(p.capex)||0),0),
+      trailingEGI: props.reduce((s,p)=>s+(Number(p.trailingEGI)||0),0),
+      brokerEGI: props.reduce((s,p)=>s+(Number(p.brokerEGI)||0),0),
+      currentOpexTotal: props.reduce((s,p)=>s+(Number(p.currentOpexTotal)||0),0),
+      marketOpexPerUnit: props.reduce((s,p)=>s+(Number(p.units)||0),0) > 0
+        ? props.reduce((s,p)=>s+((Number(p.marketOpexPerUnit)||0)*(Number(p.units)||0)),0) / props.reduce((s,p)=>s+(Number(p.units)||0),0)
+        : 0,
+    };
+  }
   const units = d.units || 1;
   const marketOpex = (d.marketOpexPerUnit||0) * units;          // our market-rate expense assumption
   const currentOpexPerUnit = (d.currentOpexTotal||0) / units;   // current T12 per unit (output)

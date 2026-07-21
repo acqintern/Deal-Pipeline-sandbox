@@ -92,6 +92,12 @@
 
   // ---- The model -----------------------------------------------------------
   function computeUW(deal) {
+    // Portfolios: each property is underwritten independently — the deal-level model IS
+    // the combined roll-up of all properties, not a model of the deal's own (unset) fields.
+    if (deal && deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1) {
+      const combined = computeCombinedUW(deal);
+      if (combined) return combined;
+    }
     const units = deal.units || 1;
     const price = numOr(deal.purchasePrice, 0);
     const capex = numOr(deal.capex, 0);
@@ -309,7 +315,10 @@
       if (opCF <= 0) { lpPref = opCF; excess = 0; lpOp = opCF; gpOp = 0; }
       else { lpPref = Math.min(opCF, prefAmt); excess = Math.max(0, opCF - prefAmt); lpOp = lpPref + lpShare * excess; gpOp = gpShare * excess; }
       // Capital events this year (refi cash-out + sale)
-      const capEvent = (uw.refiOn && uw.refiYear === y ? uw.refiCashOut : 0) + (y === uw.hold ? uw.netSaleProceeds : 0);
+      // Read capital events off the per-year rows (refiDistribution/saleProceeds) rather than
+      // the single refiYear/refiCashOut fields — this generalizes to combined portfolio models
+      // where each property may refinance in a different year.
+      const capEvent = (uw.rows[y].refiDistribution || 0) + (uw.rows[y].saleProceeds || 0);
       const roc = Math.min(Math.max(capEvent, 0), cap);
       cap -= roc;
       const capProfit = Math.max(0, capEvent - roc);
@@ -357,7 +366,11 @@
   // True once the Income & Economic Vacancy section is filled enough to project
   // returns — gross potential rent is the required driver of the cash-flow model.
   function hasUWInputs(deal) {
-    return !!deal && Number(deal.gprAnnual) > 0;
+    if (!deal) return false;
+    if (deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1) {
+      return deal.properties.some((p) => Number(p.gprAnnual) > 0);
+    }
+    return Number(deal.gprAnnual) > 0;
   }
 
   // Display cap rates used across cards/tables. When the Full UW income section is
@@ -428,8 +441,13 @@
     let cocSum = 0, cocN = 0;
     for (let y = 1; y <= hold; y++) { if (rows[y].cashOnCash != null) { cocSum += rows[y].cashOnCash; cocN++; } }
     const avgYield = cocN ? cocSum / cocN : null;
+    const price = uws.reduce((s, u) => s + u.price, 0);
+    const acqProceeds = uws.reduce((s, u) => s + (u.acqProceeds || 0), 0);
+    const closingCosts = uws.reduce((s, u) => s + (u.closingCosts || 0), 0);
+    const capex = uws.reduce((s, u) => s + (u.capex || 0), 0);
     return {
-      units: uws.reduce((s, u) => s + u.units, 0), basis, hold, rows, initialEquity,
+      units: uws.reduce((s, u) => s + u.units, 0), price, capex, basis, hold, rows, initialEquity,
+      acqProceeds, closingCosts,
       salePrice, netSaleProceeds, cfs, irr: dealIRR, equityMultiple, totalDistributions, avgYield,
       propertyCount: props.length, refiOn: uws.some((u) => u.refiOn),
     };

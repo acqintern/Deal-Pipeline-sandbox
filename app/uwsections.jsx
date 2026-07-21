@@ -46,7 +46,15 @@ function PricingBasis({ deal, set, m }) {
   return (
     <Card>
       <SectionHead icon="bank" title="Pricing & Basis" desc="Acquisition pricing — feeds the cap-rate math and the cash-flow model." />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px 22px', marginTop: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '16px 22px', marginTop: 16 }}>
+        <div><Lbl>Units</Lbl><FieldInput value={deal.units} onChange={(v) => set('units', Number(v) || 0)} align="left" /></div>
+        <div><Lbl>Vintage</Lbl>
+          <input value={deal.vintage || ''} onChange={(e) => set('vintage', e.target.value)} placeholder="Year built"
+            style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
+              fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
+            onFocus={(e) => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)'; }}
+            onBlur={(e) => { e.target.style.borderColor = 'var(--line-2)'; e.target.style.boxShadow = 'none'; }} />
+        </div>
         <div><Lbl>Ask Price</Lbl><FieldInput value={deal.askPrice} onChange={(v) => set('askPrice', v || 0)} prefix="$" /><PerUnit total={deal.askPrice} units={m.units} /></div>
         <div><Lbl>UW Price</Lbl><FieldInput value={deal.purchasePrice} onChange={(v) => set('purchasePrice', v || 0)} prefix="$" /><PerUnit total={deal.purchasePrice} units={m.units} /></div>
         <div><Lbl>CapEx Budget</Lbl><FieldInput value={deal.capex} onChange={(v) => set('capex', v || 0)} prefix="$" /><PerUnit total={deal.capex} units={m.units} /></div>
@@ -354,9 +362,11 @@ function AcqFinancingSection({ deal, set, uw }) {
 }
 function FinFooter({ uw, goingInDSCR, assumed }) {
   const ds1 = uw.acqLoan ? uw.acqLoan.dsForYear(1) : 0;
+  const ltv = uw.price > 0 ? uw.acqProceeds / uw.price : null;
   return (
-    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)', display: 'grid', gridTemplateColumns: assumed ? 'repeat(5,1fr)' : 'repeat(4,1fr)', gap: 12 }}>
       <FootStat label={assumed ? 'Assumed Balance' : 'Loan Proceeds'} value={moneyFull(uw.acqProceeds)} accent="var(--accent)" />
+      {assumed && <FootStat label="LTV" value={ltv == null ? '—' : (ltv * 100).toFixed(1) + '%'} />}
       <FootStat label="Annual Debt Service" value={moneyFull(ds1)} />
       <FootStat label="Equity Required" value={moneyFull(uw.initialEquity)} sub="incl. closing + capex" />
       <FootStat label="Going-In DSCR" value={goingInDSCR == null ? '—' : goingInDSCR.toFixed(2) + 'x'} accent={goingInDSCR != null && goingInDSCR < 1.2 ? 'var(--neg)' : 'var(--pos)'} />
@@ -561,11 +571,16 @@ function CombinedUWView({ deal }) {
       </Card>
     );
   }
+  const vintages = props.map((p) => Number(p.vintage)).filter((v) => v > 0);
+  const vintageRange = vintages.length ? (Math.min(...vintages) === Math.max(...vintages) ? String(Math.min(...vintages)) : Math.min(...vintages) + '–' + Math.max(...vintages)) : '—';
+  const totalUnits = props.reduce((s, p) => s + (Number(p.units) || 0), 0);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
         <SectionHead icon="chart" title="Combined Portfolio" desc={uwCount + ' of ' + props.length + ' properties underwritten · summed cash flows, IRR from the combined stream'} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginTop: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 14, marginTop: 14 }}>
+          <GuidancePill label="Units" value={totalUnits ? fmtNum(totalUnits) : '—'} />
+          <GuidancePill label="Vintage" value={vintageRange} />
           <GuidancePill label="Total Basis" value={moneyFull(uw.basis)} sub={uw.units ? moneyFull(uw.basis / uw.units) + ' / unit' : ''} />
           <GuidancePill label="Equity Required" value={moneyFull(uw.initialEquity)} />
           <GuidancePill label="Equity Multiple" value={uw.equityMultiple != null ? uw.equityMultiple.toFixed(2) + 'x' : '—'} />

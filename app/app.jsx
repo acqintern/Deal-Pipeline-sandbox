@@ -2319,6 +2319,7 @@ function AltusApp() {
   const [authBusy, setAuthBusy] = useS(false);
   const cloudLoaded = useR(false);
   const saveTimer = useR(null);
+  const firstPendingSaveAt = useR(null);   // bounds the debounce so continuous typing can't defer a save indefinitely
   const mainRef = useR(null);          // ref to <main> for scroll save/restore
   const savedScrollRef = useR(0);      // saved scroll position before opening a deal
   const contactsLoaded = useR(false);
@@ -2452,7 +2453,15 @@ function AltusApp() {
     if (cloud.enabled && (!cloud.requireLogin || session) && cloudLoaded.current) {
       setSaveState('dirty');
       clearTimeout(saveTimer.current);
+      const now = Date.now();
+      if (!firstPendingSaveAt.current) firstPendingSaveAt.current = now;
+      // Shorter trailing debounce so co-editors see changes sooner, plus a hard 1.5s cap on
+      // how long continuous edits (e.g. tabbing through many fields) can keep deferring a
+      // save — previously an uninterrupted editing streak could push the save out indefinitely,
+      // widening the window in which a closed tab/lost connection loses unsaved edits.
+      const delay = (now - firstPendingSaveAt.current >= 1500) ? 0 : 400;
       saveTimer.current = setTimeout(() => {
+        firstPendingSaveAt.current = null;
         setSaveState('saving');
         const snap = {};
         dealsRef.current.forEach((d) => { snap[d.id] = JSON.stringify(d); });
@@ -2460,7 +2469,7 @@ function AltusApp() {
         cloud.saveDeals(dealsRef.current)
           .then(() => setSaveState('saved'))
           .catch((e) => { console.warn('[cloud] save failed', e); setSaveState('error'); });
-      }, 700);
+      }, delay);
     }
   }, [deals]);
 
@@ -2503,6 +2512,17 @@ function AltusApp() {
       setDeals((ds) => {
         const existing = ds.find((d) => d.id === incoming.id);
         if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ds;
+        // Guard against applying a stale/partial row over real local data — if the incoming
+        // row is drastically smaller (e.g. a delayed echo of a pre-edit snapshot, or a
+        // truncated write) it's more likely data loss than a legitimate remote edit.
+        if (existing) {
+          const existingLen = JSON.stringify(existing).length;
+          const incomingLen = JSON.stringify(incoming).length;
+          if (existingLen > 200 && incomingLen < existingLen * 0.5) {
+            console.warn('[cloud] ignored suspiciously smaller realtime update for deal', incoming.id, { existingLen, incomingLen });
+            return ds;
+          }
+        }
         return existing ? ds.map((d) => d.id === incoming.id ? incoming : d) : [...ds, incoming];
       });
     });
@@ -2694,13 +2714,15 @@ function AltusApp() {
     const mr = d.marketReview && d.marketReview.status === 'done' ? d.marketReview.data : null;
     const ctx = [
       'Property: ' + (d.name || '') + (d.market ? ' — ' + d.market : ''),
+      d.isPortfolio && Array.isArray(d.properties) && d.properties.length > 1
+        ? 'Portfolio of ' + d.properties.length + ' properties: ' + d.properties.map((p) => p.name || 'Unnamed').join(', ') : '',
       d.units ? 'Units: ' + d.units : '', d.vintage ? 'Year built: ' + d.vintage : '',
       d.purchasePrice ? 'UW price: $' + Math.round(d.purchasePrice).toLocaleString() : '',
       d.askPrice ? 'Ask: $' + Math.round(d.askPrice).toLocaleString() : '',
       m.goingInCap ? 'Going-in cap: ' + (m.goingInCap * 100).toFixed(2) + '%' : '',
       m.stabilizedCap ? 'Stabilized cap: ' + (m.stabilizedCap * 100).toFixed(2) + '%' : '',
       uw ? 'Levered IRR: ' + (uw.irr != null ? (uw.irr * 100).toFixed(1) + '%' : 'n/a') + ', Equity multiple: ' + (uw.equityMultiple != null ? uw.equityMultiple.toFixed(2) + 'x' : 'n/a') : '',
-      uw ? 'In-place economic vacancy: ' + (uw.inPlaceEconVac * 100).toFixed(1) + '%, stabilized: ' + (uw.stabVac * 100).toFixed(1) + '%' : '',
+      uw && uw.inPlaceEconVac != null ? 'In-place economic vacancy: ' + (uw.inPlaceEconVac * 100).toFixed(1) + '%, stabilized: ' + (uw.stabVac * 100).toFixed(1) + '%' : '',
       mr ? 'Independent market read — grade ' + (mr.grade || '?') + '; ' + (mr.overallAssessment || '') : '',
       d.notes ? 'Analyst notes: ' + String(d.notes).slice(0, 800) : '',
     ].filter(Boolean).join('\n');

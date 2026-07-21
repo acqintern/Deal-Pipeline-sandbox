@@ -11,6 +11,10 @@
     try {
       client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
         auth: { persistSession: true, autoRefreshToken: true },
+        // keepalive:true lets the browser finish in-flight writes after the tab is closed/
+        // navigated away — without it, a save fired from pagehide/beforeunload (the last save
+        // before quitting) can be aborted mid-flight and silently lose that edit.
+        global: { fetch: (url, opts) => fetch(url, { ...opts, keepalive: true }) },
       });
     } catch (e) { console.warn('[AltusCloud] init failed:', e); client = null; }
   }

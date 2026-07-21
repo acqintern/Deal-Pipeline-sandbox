@@ -893,16 +893,26 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   const patch = (obj) => onPatch(deal.id, obj);
   const makeProperty = (i) => ({ id: 'p' + Date.now() + '_' + i, name: 'Property ' + (i + 1),
     market: deal.market || '', units: '', vintage: '', askPrice: '', purchasePrice: '', notes: '' });
+  // Roll per-property Ask/UW price + units up to deal-level fields, atomically alongside the
+  // properties patch — every board/table/pipeline view reads d.askPrice/d.purchasePrice/d.units
+  // directly and isn't portfolio-aware, so these must stay in sync whenever properties change.
+  const rollupProperties = (arr) => ({
+    properties: arr,
+    askPrice: arr.reduce((s, p) => s + (Number(p.askPrice) || 0), 0),
+    purchasePrice: arr.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0),
+    units: arr.reduce((s, p) => s + (Number(p.units) || 0), 0),
+  });
   const setPropertyCount = (n) => {
     const cur = Array.isArray(deal.properties) ? deal.properties : [];
     const next = cur.slice(0, n);
     while (next.length < n) next.push(makeProperty(next.length));
-    set('properties', next);
+    patch(rollupProperties(next));
   };
   const togglePortfolio = (on) => {
     if (on) {
       const cur = Array.isArray(deal.properties) ? deal.properties : [];
-      patch({ isPortfolio: true, properties: cur.length >= 2 ? cur : [makeProperty(0), makeProperty(1)] });
+      const arr = cur.length >= 2 ? cur : [makeProperty(0), makeProperty(1)];
+      patch({ isPortfolio: true, ...rollupProperties(arr) });
     } else {
       set('isPortfolio', false);
     }
@@ -1233,7 +1243,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
             </div>
             {properties.map((p, i) =>
             <PropertySection key={p.id || i} property={p} index={i}
-            onChange={(next) => { const arr = [...properties]; arr[i] = next; set('properties', arr); }}
+            onChange={(next) => { const arr = [...properties]; arr[i] = next; patch(rollupProperties(arr)); }}
             onRemove={() => setPropertyCount(properties.length - 1)}
             canRemove={properties.length > 2} />
             )}
