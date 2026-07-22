@@ -2288,6 +2288,31 @@ function SaveIndicator({ state }) {
   );
 }
 
+// Full-width, persistent banner for save failures — the corner SaveIndicator is easy to
+// miss during focused work, which is exactly how "Triad 3 Portfolio" got closed/logged
+// out from without anyone noticing the save had stopped going through.
+function SaveErrorBanner({ state, onRetry }) {
+  if (state !== 'error' && state !== 'conflict') return null;
+  const isConflict = state === 'conflict';
+  return (
+    <div style={{ background: isConflict ? '#4a1414' : '#5c1f1f', color: '#ffd7d7', padding: '9px 22px',
+      display: 'flex', alignItems: 'center', gap: 12, fontSize: 13, flex: 'none', borderBottom: '1px solid rgba(255,255,255,.12)' }}>
+      <Icon name="pulse" size={15} style={{ flex: 'none' }} />
+      <span style={{ flex: 1 }}>
+        {isConflict
+          ? 'Sync paused — the cloud read looked wrong, so nothing was overwritten. Contact an admin before continuing to edit.'
+          : "Your changes aren't saving. Don't close this tab or log out until this is resolved — check your connection and retry."}
+      </span>
+      {!isConflict && (
+        <button onClick={onRetry} style={{ border: '1px solid rgba(255,255,255,.35)', background: 'rgba(255,255,255,.08)',
+          color: '#fff', borderRadius: 6, padding: '5px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', flex: 'none' }}>
+          Retry now
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AltusApp() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [deals, setDeals] = useS(() => migrateDeals(loadDeals()));
@@ -2331,6 +2356,7 @@ function AltusApp() {
   const [pipeSortKey, setPipeSortKey] = useS('manual');
   const [pipeSortDir, setPipeSortDir] = useS('asc');
   const [saveState, setSaveState] = useS('idle'); // idle | dirty | saving | saved | error
+  const saveStateRef = useR('idle');
 
   useE(() => {
     if (!cloud.requireLogin) { setSession(null); return; }
@@ -2473,14 +2499,26 @@ function AltusApp() {
     }
   }, [deals]);
 
+  // Manual retry for the error banner — bypasses the debounce and fires the save immediately.
+  const retrySaveNow = () => {
+    if (!cloud.enabled) return;
+    clearTimeout(saveTimer.current);
+    firstPendingSaveAt.current = null;
+    setSaveState('saving');
+    cloud.saveDeals(dealsRef.current)
+      .then(() => setSaveState('saved'))
+      .catch((e) => { console.warn('[cloud] retry save failed', e); setSaveState('error'); });
+  };
+
   // Flush any pending save when the tab is hidden or closed, so edits made right before
-  // leaving aren't lost to the debounce window.
+  // leaving aren't lost to the debounce window. Best-effort — the browser can still cut
+  // this off mid-flight on an actual close, which is exactly why the beforeunload warning
+  // below exists as a second line of defense.
   useE(() => {
     if (!cloud.enabled) return;
     const flush = () => {
       if (!cloudLoaded.current) return;
       clearTimeout(saveTimer.current);
-      // keepalive upsert so the request survives page teardown
       cloud.saveDeals(dealsRef.current).catch(() => {});
     };
     const onVis = () => { if (document.visibilityState === 'hidden') flush(); };
@@ -2492,6 +2530,27 @@ function AltusApp() {
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', flush);
     };
+  }, []);
+
+  // Keep a ref mirror of saveState so the beforeunload handler (registered once) always
+  // reads the current value instead of a stale closure.
+  useE(() => { saveStateRef.current = saveState; }, [saveState]);
+
+  // Warn before leaving with unsaved or failed changes. A stuck/failed save is otherwise
+  // easy to miss — this is the safety net for exactly the case that lost "Triad 3
+  // Portfolio" on 2026-07-22: edits sitting unsaved (or failing to save) with no friction
+  // stopping someone from closing the tab or logging out before they land.
+  useE(() => {
+    if (!cloud.enabled) return;
+    const onBeforeUnload = (e) => {
+      const s = saveStateRef.current;
+      if (s === 'dirty' || s === 'saving' || s === 'error' || s === 'conflict') {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
   // Live cloud sync: reflect other clients' changes in realtime via Supabase Postgres changes.
@@ -2979,6 +3038,8 @@ ${text}`;
           </svg>
         </button>
       </header>
+
+      <SaveErrorBanner state={saveState} onRetry={retrySaveNow} />
 
       {/* ── Settings Panel ── */}
       {showSettings && (

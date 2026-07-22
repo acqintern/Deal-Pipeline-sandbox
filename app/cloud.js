@@ -141,13 +141,38 @@
   // Fetches cloud deals and replaces localDeals with them (see reconcileTable).
   // Returns { items, changed, suspicious }. On `suspicious`, localDeals is returned
   // untouched — the caller should surface a warning instead of applying anything.
+  //
+  // Before applying the cloud read, give any deal that exists only in this tab's local
+  // state — and has NEVER been confirmed saved (not in `synced`, not in the cloud read
+  // either) — one more explicit save attempt. Without this, a deal whose debounced
+  // auto-save simply hadn't fired yet (or had silently been failing) gets treated as
+  // "cloud doesn't have it, so it doesn't exist" and is discarded with no warning the
+  // moment ANY tab reconciles — the exact way "Triad 3 Portfolio" was lost on 2026-07-22.
+  // The existing circuit breaker only protects previously-synced rows from a bad read;
+  // it does nothing for a deal that was never synced in the first place.
   async function reconcileDeals(localDeals) {
     const rows = await loadDeals();
     if (rows === null) return { items: localDeals, changed: false, suspicious: false };
-    return reconcileTable('deals', localDeals, rows, {
+    const base = synced('deals');
+    const cloudById = new Map(rows.map((row) => [String(row.id), row]));
+    const neverSynced = localDeals.filter((d) => !base[String(d.id)] && !cloudById.has(String(d.id)));
+    if (neverSynced.length) {
+      try {
+        await saveDeals(neverSynced);
+      } catch (e) {
+        return { items: localDeals, changed: false, suspicious: true, dropped: neverSynced.length, total: neverSynced.length };
+      }
+    }
+    const result = reconcileTable('deals', localDeals, rows, {
       fp: dealFp,
       fromRow: (row) => ({ ...(row.data || {}), id: row.id }),
     });
+    if (neverSynced.length && !result.suspicious) {
+      const resultIds = new Set(result.items.map((d) => String(d.id)));
+      const toAppend = neverSynced.filter((d) => !resultIds.has(String(d.id)));
+      if (toAppend.length) return { ...result, items: [...result.items, ...toAppend], changed: true };
+    }
+    return result;
   }
 
   // Explicitly remove specific deal IDs from cloud. Called only when the user
