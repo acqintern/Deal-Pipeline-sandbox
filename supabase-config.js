@@ -18,10 +18,14 @@ window.ALTUS_CONFIG = {
 //    dashboard) — never in the browser. This just points the app at that endpoint.
 window.ALTUS_AI = {
   complete: async (prompt, maxTokens) => {
-    // Abort quickly in environments without the API endpoint (e.g. preview)
-    // so the window.claude fallback gets its full 30-second budget.
+    // Only fail fast when window.claude exists as a fallback (Design Canvas preview) —
+    // there, a fast abort just hands off to the fallback quickly. On a real deployment
+    // there is no fallback, so a hard 4s cap here aborted every real document parse
+    // before the Cloudflare Function (and Anthropic) could respond — large OMs/rent
+    // rolls routinely take well past 4s. Give real parsing the time it actually needs.
+    const hasFallback = window.claude && typeof window.claude.complete === 'function';
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 4000);
+    const tid = setTimeout(() => controller.abort(), hasFallback ? 4000 : 60000);
     let r;
     try {
       r = await fetch('/api/claude', {
