@@ -579,6 +579,10 @@ function CombinedUWView({ deal, set }) {
       <Card>
         <SectionHead icon="chart" title="Combined Portfolio" desc={uwCount + ' of ' + props.length + ' properties underwritten · summed cash flows, IRR from the combined stream'} />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14, marginTop: 14 }}>
+          <div><Lbl>Guidance Price</Lbl><FieldInput value={deal.askPrice} onChange={(v) => set('askPrice', v || 0)} prefix="$" /><PerUnit total={deal.askPrice} units={deal.units || totalUnits} /></div>
+          <div><Lbl>UW Price</Lbl><FieldInput value={deal.purchasePrice} onChange={(v) => set('purchasePrice', v || 0)} prefix="$" /><PerUnit total={deal.purchasePrice} units={deal.units || totalUnits} /></div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14, marginTop: 14 }}>
           <div><Lbl>Units</Lbl><FieldInput value={deal.units || totalUnits} onChange={(v) => set('units', Number(v) || 0)} align="left" /></div>
           <div><Lbl>Vintage</Lbl>
             <input value={deal.vintage || vintageRange} onChange={(e) => set('vintage', e.target.value)} placeholder="Year built"
