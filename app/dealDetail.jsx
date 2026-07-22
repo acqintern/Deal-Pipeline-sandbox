@@ -907,15 +907,24 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   const patch = (obj) => onPatch(deal.id, obj);
   const makeProperty = (i) => ({ id: 'p' + Date.now() + '_' + i, name: 'Property ' + (i + 1),
     market: deal.market || '', units: '', vintage: '', askPrice: '', purchasePrice: '', notes: '' });
-  // Roll per-property Ask/UW price + units up to deal-level fields, atomically alongside the
-  // properties patch — every board/table/pipeline view reads d.askPrice/d.purchasePrice/d.units
-  // directly and isn't portfolio-aware, so these must stay in sync whenever properties change.
-  const rollupProperties = (arr) => ({
-    properties: arr,
-    askPrice: arr.reduce((s, p) => s + (Number(p.askPrice) || 0), 0),
-    purchasePrice: arr.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0),
-    units: arr.reduce((s, p) => s + (Number(p.units) || 0), 0),
-  });
+  // Roll per-property Ask/UW price + units + vintage up to deal-level fields, atomically
+  // alongside the properties patch — every board/table/pipeline view reads
+  // d.askPrice/d.purchasePrice/d.units/d.vintage directly and isn't portfolio-aware, so
+  // these must stay in sync whenever properties change. Vintage rolls up as a min–max
+  // range (e.g. "1988–2004"), same convention as the Full UW Combined tab.
+  const rollupProperties = (arr) => {
+    const vintages = arr.map((p) => Number(p.vintage)).filter((v) => v > 0);
+    const vintage = vintages.length
+      ? (Math.min(...vintages) === Math.max(...vintages) ? String(Math.min(...vintages)) : Math.min(...vintages) + '–' + Math.max(...vintages))
+      : '';
+    return {
+      properties: arr,
+      askPrice: arr.reduce((s, p) => s + (Number(p.askPrice) || 0), 0),
+      purchasePrice: arr.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0),
+      units: arr.reduce((s, p) => s + (Number(p.units) || 0), 0),
+      vintage,
+    };
+  };
   const setPropertyCount = (n) => {
     const cur = Array.isArray(deal.properties) ? deal.properties : [];
     const next = cur.slice(0, n);

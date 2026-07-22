@@ -445,9 +445,28 @@
     const acqProceeds = uws.reduce((s, u) => s + (u.acqProceeds || 0), 0);
     const closingCosts = uws.reduce((s, u) => s + (u.closingCosts || 0), 0);
     const capex = uws.reduce((s, u) => s + (u.capex || 0), 0);
+    // ---- Income-statement + assumption roll-up (dollar fields sum; rate/assumption
+    // fields blend basis-weighted) so the KPI strip and IC memo can show combined
+    // physical vacancy, loss-to-lease, bad debt/concessions, and UW assumptions for
+    // portfolios instead of reading these off a single-property-only computeUW result.
+    const gpr0 = uws.reduce((s, u) => s + (u.gpr0 || 0), 0);
+    const physVac = uws.reduce((s, u) => s + (u.physVac || 0), 0);
+    const ltl = uws.reduce((s, u) => s + (u.ltl || 0), 0);
+    const badDebt = uws.reduce((s, u) => s + (u.badDebt || 0), 0);
+    const concessions = uws.reduce((s, u) => s + (u.concessions || 0), 0);
+    const otherIncome = uws.reduce((s, u) => s + (u.otherIncome || 0), 0);
+    const econLoss0 = physVac + ltl + badDebt + concessions;
+    const inPlaceEconVac = gpr0 > 0 ? econLoss0 / gpr0 : 0;
+    const wavg = (f) => basis > 0
+      ? uws.reduce((s, u) => s + (u[f] || 0) * u.basis, 0) / basis
+      : (uws.reduce((s, u) => s + (u[f] || 0), 0) / uws.length);
+    const gprGrowth = wavg('gprGrowth'), opexGrowth = wavg('opexGrowth');
+    const stabVac = wavg('stabVac'), exitCap = wavg('exitCap'), closingPct = wavg('closingPct');
     return {
       units: uws.reduce((s, u) => s + u.units, 0), price, capex, basis, hold, rows, initialEquity,
       acqProceeds, closingCosts,
+      gpr0, physVac, ltl, badDebt, concessions, otherIncome, econLoss0, inPlaceEconVac,
+      gprGrowth, opexGrowth, stabVac, exitCap, closingPct,
       salePrice, netSaleProceeds, cfs, irr: dealIRR, equityMultiple, totalDistributions, avgYield,
       propertyCount: props.length, refiOn: uws.some((u) => u.refiOn),
     };
