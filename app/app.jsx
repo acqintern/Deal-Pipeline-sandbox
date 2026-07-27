@@ -1811,6 +1811,7 @@ const NAV = [
 { key: 'pipeline', label: 'Pipeline', icon: 'board' },
 { key: 'loi', label: 'LOI Status', icon: 'flag' },
 { key: 'metrics', label: 'Metrics', icon: 'pulse' },
+{ key: 'ees', label: 'EES', icon: 'target' },
 { key: 'brokercalls', label: 'Broker Calls', icon: 'note' },
 { key: 'tasks', label: 'Tasks', icon: 'check' },
 { key: 'crm', label: 'CRM', icon: 'deal' },
@@ -3114,6 +3115,8 @@ ${text}`;
         zebra={t.zebra} /> :
         view === 'loi' ? <LOIStatusView deals={loiDeals} onOpen={open} onPatch={patch} /> :
         view === 'metrics' ? <MetricsView deals={liveDeals} onOpen={open} /> :
+        view === 'ees' ? (window.EESView ? <window.EESView deals={deals} onPatch={patch}
+          onOpen={(id) => { open(id); setView('pipeline'); }} /> : null) :
         view === 'brokercalls' ? <BrokerCallsView deals={liveDeals} onOpen={open} /> :
         view === 'dead' ? <DeadDealsView deals={deadDeals} onOpen={open} onPatch={patch}
         onBulkPatch={bulkPatch} onBulkDelete={bulkDelete} onReorder={reorderVisible}

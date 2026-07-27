@@ -574,14 +574,11 @@ function CombinedUWView({ deal, set }) {
   const vintages = props.map((p) => Number(p.vintage)).filter((v) => v > 0);
   const vintageRange = vintages.length ? (Math.min(...vintages) === Math.max(...vintages) ? String(Math.min(...vintages)) : Math.min(...vintages) + '–' + Math.max(...vintages)) : '—';
   const totalUnits = props.reduce((s, p) => s + (Number(p.units) || 0), 0);
+  const totalGuidance = props.reduce((s, p) => s + (Number(p.askPrice) || 0), 0);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
         <SectionHead icon="chart" title="Combined Portfolio" desc={uwCount + ' of ' + props.length + ' properties underwritten · summed cash flows, IRR from the combined stream'} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14, marginTop: 14 }}>
-          <div><Lbl>Guidance Price</Lbl><FieldInput value={deal.askPrice} onChange={(v) => set('askPrice', v || 0)} prefix="$" /><PerUnit total={deal.askPrice} units={deal.units || totalUnits} /></div>
-          <div><Lbl>UW Price</Lbl><FieldInput value={deal.purchasePrice} onChange={(v) => set('purchasePrice', v || 0)} prefix="$" /><PerUnit total={deal.purchasePrice} units={deal.units || totalUnits} /></div>
-        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14, marginTop: 14 }}>
           <div><Lbl>Units</Lbl><FieldInput value={deal.units || totalUnits} onChange={(v) => set('units', Number(v) || 0)} align="left" /></div>
           <div><Lbl>Vintage</Lbl>
@@ -594,9 +591,11 @@ function CombinedUWView({ deal, set }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginTop: 12 }}>
           <GuidancePill label="Total Basis" value={moneyFull(uw.basis)} sub={uw.units ? moneyFull(uw.basis / uw.units) + ' / unit' : ''} />
+          <GuidancePill label="Total Guidance Price" value={totalGuidance ? moneyFull(totalGuidance) : '—'}
+            sub={totalGuidance && uw.basis ? (uw.basis <= totalGuidance ? moneyFull(totalGuidance - uw.basis) + ' below ask' : moneyFull(uw.basis - totalGuidance) + ' over ask') : ''}
+            accent={totalGuidance && uw.basis ? (uw.basis <= totalGuidance ? 'var(--pos)' : 'var(--neg)') : 'var(--faint)'} />
           <GuidancePill label="Equity Required" value={moneyFull(uw.initialEquity)} />
           <GuidancePill label="Equity Multiple" value={uw.equityMultiple != null ? uw.equityMultiple.toFixed(2) + 'x' : '—'} />
-          <GuidancePill label="Avg Yield" value={uw.avgYield != null ? (uw.avgYield * 100).toFixed(1) + '%' : '—'} />
           <GuidancePill label="Levered IRR" value={uw.irr != null ? (uw.irr * 100).toFixed(1) + '%' : '—'} accent={uw.irr != null ? 'var(--pos)' : 'var(--faint)'} />
         </div>
       </Card>

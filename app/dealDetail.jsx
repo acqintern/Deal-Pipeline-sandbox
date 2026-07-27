@@ -907,24 +907,15 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   const patch = (obj) => onPatch(deal.id, obj);
   const makeProperty = (i) => ({ id: 'p' + Date.now() + '_' + i, name: 'Property ' + (i + 1),
     market: deal.market || '', units: '', vintage: '', askPrice: '', purchasePrice: '', notes: '' });
-  // Roll per-property Ask/UW price + units + vintage up to deal-level fields, atomically
-  // alongside the properties patch — every board/table/pipeline view reads
-  // d.askPrice/d.purchasePrice/d.units/d.vintage directly and isn't portfolio-aware, so
-  // these must stay in sync whenever properties change. Vintage rolls up as a min–max
-  // range (e.g. "1988–2004"), same convention as the Full UW Combined tab.
-  const rollupProperties = (arr) => {
-    const vintages = arr.map((p) => Number(p.vintage)).filter((v) => v > 0);
-    const vintage = vintages.length
-      ? (Math.min(...vintages) === Math.max(...vintages) ? String(Math.min(...vintages)) : Math.min(...vintages) + '–' + Math.max(...vintages))
-      : '';
-    return {
-      properties: arr,
-      askPrice: arr.reduce((s, p) => s + (Number(p.askPrice) || 0), 0),
-      purchasePrice: arr.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0),
-      units: arr.reduce((s, p) => s + (Number(p.units) || 0), 0),
-      vintage,
-    };
-  };
+  // Roll per-property Ask/UW price + units up to deal-level fields, atomically alongside the
+  // properties patch — every board/table/pipeline view reads d.askPrice/d.purchasePrice/d.units
+  // directly and isn't portfolio-aware, so these must stay in sync whenever properties change.
+  const rollupProperties = (arr) => ({
+    properties: arr,
+    askPrice: arr.reduce((s, p) => s + (Number(p.askPrice) || 0), 0),
+    purchasePrice: arr.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0),
+    units: arr.reduce((s, p) => s + (Number(p.units) || 0), 0),
+  });
   const setPropertyCount = (n) => {
     const cur = Array.isArray(deal.properties) ? deal.properties : [];
     const next = cur.slice(0, n);
@@ -941,6 +932,12 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
     }
   };
   const properties = Array.isArray(deal.properties) ? deal.properties : [];
+  const propertyVintageRange = (() => {
+    const vs = properties.map((p) => Number(p.vintage)).filter((v) => v > 0);
+    if (!vs.length) return '—';
+    const lo = Math.min(...vs), hi = Math.max(...vs);
+    return lo === hi ? String(lo) : lo + '–' + hi;
+  })();
   const UploadBtn = window.OMBtn;
   const T12Banner = window.T12ParsedSection;
   const RRBanner = window.RentRollParsedSection;
@@ -991,7 +988,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
               <span style={{ flex: 'none' }}>{deal.type}</span>
               <Sep /><span style={{ flex: 'none' }}>{deal.market || '—'}</span>
               {deal.units ? <><Sep /><span className="num" style={{ flex: 'none' }}>{fmtNum(deal.units)} units</span></> : null}
-              {deal.vintage ? <><Sep /><span className="num" style={{ flex: 'none' }}>Built {deal.vintage}</span></> : null}
+              {(deal.vintage || (deal.isPortfolio && propertyVintageRange !== '—')) ? <><Sep /><span className="num" style={{ flex: 'none' }}>Built {deal.vintage || propertyVintageRange}</span></> : null}
             </div>
           </div>
         </div>
@@ -1047,7 +1044,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                 <TypeTag type={deal.type} />
                 <Sep /><span>{deal.market || '—'}</span>
                 {deal.units ? <><Sep /><span className="num">{fmtNum(deal.units)} units</span></> : null}
-                {deal.vintage ? <><Sep /><span className="num">Built {deal.vintage}</span></> : null}
+                {(deal.vintage || (deal.isPortfolio && propertyVintageRange !== '—')) ? <><Sep /><span className="num">Built {deal.vintage || propertyVintageRange}</span></> : null}
                 {deal.broker ? <><Sep /><span className="clip" style={{ maxWidth: 280 }}>{deal.broker}</span></> : null}
               </div>
             </div>
@@ -1139,11 +1136,14 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                   onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
                   </EField>
                   <EField label="Vintage">
-                    <input value={deal.vintage || ''} onChange={(e) => set('vintage', e.target.value)} placeholder="Year built"
+                    <input value={deal.vintage || (deal.isPortfolio ? propertyVintageRange : '')} onChange={(e) => set('vintage', e.target.value)}
+                  placeholder={deal.isPortfolio && propertyVintageRange !== '—' ? propertyVintageRange : 'Year built'}
                   style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
                     fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
                   onFocus={(e) => {e.target.style.borderColor = 'var(--accent)';e.target.style.boxShadow = '0 0 0 3px var(--accent-soft)';}}
                   onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
+                  {deal.isPortfolio && !deal.vintage && propertyVintageRange !== '—' &&
+                  <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3 }}>From property vintages — edit to override</div>}
                   </EField>
                   <EField label="Broker Firm">
                     <input value={deal.broker || ''} onChange={(e) => set('broker', e.target.value)} placeholder="Brokerage / team"
