@@ -594,15 +594,19 @@ function StageStepper({ stage, onChange }) {
 }
 
 /* full-bleed 5-up KPI strip + optional returns row */
-function KpiStrip({ deal, m, propView }) {
+function KpiStrip({ deal, m, propView, excluded }) {
   const isPortfolio = !!deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1;
   const selIdx = isPortfolio && propView && propView.startsWith('p') ? Number(propView.slice(1)) : null;
   const selProperty = selIdx != null && deal.properties[selIdx] ? deal.properties[selIdx] : null;
+  // Combined view respects the Full UW tab's property-inclusion selection so the strip
+  // never disagrees with the combined model rendered in the body.
+  const incProps = isPortfolio ? deal.properties.filter((p, i) => !(excluded || {})[p.id || i]) : [];
+  const incDeal = isPortfolio ? { ...deal, properties: incProps } : deal;
   const selM = selProperty ? computeMetrics(selProperty) : null;
   // Portfolios: sum per-property Full UW into the combined model (each property is
   // underwritten independently), or show one selected property's own Full UW.
   // Single deals: Full UW (Yr1/Yr3 YOC) over Quick UW fallback.
-  const combined = isPortfolio && !selProperty && window.computeCombinedUW ? window.computeCombinedUW(deal) : null;
+  const combined = isPortfolio && !selProperty && window.computeCombinedUW ? window.computeCombinedUW(incDeal) : null;
   const selUw = selProperty && window.hasUWInputs && window.hasUWInputs(selProperty) && window.computeUW ? window.computeUW(selProperty) : null;
   const fullUW = isPortfolio ? (selProperty ? !!selUw : !!combined) : (window.hasUWInputs ? window.hasUWInputs(deal) : false);
   const uw = isPortfolio ? (selProperty ? selUw : combined) : (fullUW && window.computeUW ? window.computeUW(deal) : null);
@@ -616,9 +620,9 @@ function KpiStrip({ deal, m, propView }) {
   const capSrc = uw ? 'Full UW' : 'Quick UW';
 
   const askSum = selProperty ? Number(selProperty.askPrice) || 0
-    : isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.askPrice) || 0), 0) : deal.askPrice;
+    : isPortfolio ? (incProps.reduce((s, p) => s + (Number(p.askPrice) || 0), 0) || (incProps.length === deal.properties.length ? Number(deal.askPrice) || 0 : 0)) : deal.askPrice;
   const uwSum = selProperty ? Number(selProperty.purchasePrice) || 0
-    : isPortfolio ? deal.properties.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0) : deal.purchasePrice;
+    : isPortfolio ? (incProps.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0) || (incProps.length === deal.properties.length ? Number(deal.purchasePrice) || 0 : 0)) : deal.purchasePrice;
   const totalBasis = uw ? uw.basis : mBase.totalBasis;
 
   const priceCells = [
@@ -642,7 +646,7 @@ function KpiStrip({ deal, m, propView }) {
     <div>
       {isPortfolio &&
       <div style={{ padding: '8px 16px 0', fontSize: 11, fontWeight: 600, color: 'var(--muted)' }}>
-        Showing: <span style={{ color: 'var(--accent)' }}>{selProperty ? selProperty.name || 'Property ' + (selIdx + 1) : 'Combined (' + deal.properties.length + ')'}</span>
+        Showing: <span style={{ color: 'var(--accent)' }}>{selProperty ? selProperty.name || 'Property ' + (selIdx + 1) : 'Combined (' + incProps.length + (incProps.length === deal.properties.length ? '' : ' of ' + deal.properties.length) + ')'}</span>
       </div>}
       <div style={{ display: 'flex', borderTop: '1px solid var(--line)', overflow: 'hidden' }}>
         {cells.map((c, i) =>
@@ -889,11 +893,12 @@ function EditableTitle({ value, onCommit }) {
 }
 function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMUpload,
   t12Data, rrData, onT12Upload, onRRUpload, onClearOM, onClearT12, onClearRR,
-  onRunMarketReview, onRunMemo,
+  onRunMarketReview, onRunMemo, onImportCoStar,
   todos, onAddTodo, onPatchTodo, onDeleteTodo, onViewTasks }) {
   const [tab, setTab] = useStateD('summary');
   const [propView, setPropView] = useStateD('combined');
   const [omTargetIdx, setOmTargetIdx] = useStateD(0);
+  const [excluded, setExcluded] = useStateD({});
   const [sticky, setSticky] = useStateD(false);
   const titleSentinelRef = useRefD(null);
   useEffectD(() => {
@@ -910,12 +915,18 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   // Roll per-property Ask/UW price + units up to deal-level fields, atomically alongside the
   // properties patch — every board/table/pipeline view reads d.askPrice/d.purchasePrice/d.units
   // directly and isn't portfolio-aware, so these must stay in sync whenever properties change.
-  const rollupProperties = (arr) => ({
-    properties: arr,
-    askPrice: arr.reduce((s, p) => s + (Number(p.askPrice) || 0), 0),
-    purchasePrice: arr.reduce((s, p) => s + (Number(p.purchasePrice) || 0), 0),
-    units: arr.reduce((s, p) => s + (Number(p.units) || 0), 0),
-  });
+  // Only roll a field up when at least one property actually carries a value for it —
+  // otherwise a Full UW edit on a portfolio whose per-property prices are blank would
+  // zero out the deal-level Ask/UW Price and Units the KPI strip and pipeline read.
+  const rollupProperties = (arr) => {
+    const out = { properties: arr };
+    const roll = (key) => {
+      if (!arr.some((p) => Number(p[key]) > 0)) return;
+      out[key] = arr.reduce((s, p) => s + (Number(p[key]) || 0), 0);
+    };
+    roll('askPrice'); roll('purchasePrice'); roll('units');
+    return out;
+  };
   const setPropertyCount = (n) => {
     const cur = Array.isArray(deal.properties) ? deal.properties : [];
     const next = cur.slice(0, n);
@@ -1073,7 +1084,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
         </div>
 
         {/* KPI strip */}
-        <KpiStrip deal={deal} m={m} propView={propView} />
+        <KpiStrip deal={deal} m={m} propView={propView} excluded={excluded} />
 
         {/* tabs */}
         <DetailTabs tab={tab} setTab={setTab} showProperties={!!deal.isPortfolio} />
@@ -1136,7 +1147,7 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                   onBlur={(e) => {e.target.style.borderColor = 'var(--line-2)';e.target.style.boxShadow = 'none';}} />
                   </EField>
                   <EField label="Vintage">
-                    <input value={deal.vintage || (deal.isPortfolio ? propertyVintageRange : '')} onChange={(e) => set('vintage', e.target.value)}
+                    <input value={deal.vintage || (deal.isPortfolio && propertyVintageRange !== '—' ? propertyVintageRange : '')} onChange={(e) => set('vintage', e.target.value)}
                   placeholder={deal.isPortfolio && propertyVintageRange !== '—' ? propertyVintageRange : 'Year built'}
                   style={{ border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px', background: 'var(--panel)',
                     fontSize: 13.5, height: 34, width: '100%', boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)' }}
@@ -1295,14 +1306,14 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
         {tab === 'quickuw' && window.QuickUnderwritingTab && <window.QuickUnderwritingTab deal={deal} set={set} />}
 
         {/* ===== FULL UNDERWRITING ===== */}
-        {tab === 'fulluw' && window.FullUnderwritingTab && <window.FullUnderwritingTab deal={deal} set={set} propView={propView} setPropView={setPropView} setProperties={(arr) => patch(rollupProperties(arr))} />}
+        {tab === 'fulluw' && window.FullUnderwritingTab && <window.FullUnderwritingTab deal={deal} set={set} propView={propView} setPropView={setPropView} setProperties={(arr) => patch(rollupProperties(arr))} excluded={excluded} setExcluded={setExcluded} stickyTop={sticky ? 44 : 0} />}
 
         {/* ===== RETURN METRICS ===== */}
         {tab === 'returns' && window.ReturnsTab && <window.ReturnsTab deal={deal} set={set} />}
 
         {/* ===== PROPERTY / SUBMARKET REVIEW ===== */}
         {tab === 'market' && window.MarketReviewTab &&
-        <window.MarketReviewTab deal={deal} onRun={onRunMarketReview} />
+        <window.MarketReviewTab deal={deal} onRun={onRunMarketReview} onImportCoStar={onImportCoStar} />
         }
 
         {/* ===== LOCATION ===== */}

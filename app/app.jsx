@@ -2314,6 +2314,167 @@ function SaveErrorBanner({ state, onRetry }) {
   );
 }
 
+/* ── Activity feed: what changed while you were away ───────────────────────────
+   Diffs the cloud copy against what this browser last saw (on load) and against
+   live realtime updates, so a returning user can follow other people's saves. */
+const LS_ACTIVITY      = 'altus_activity_v1';
+const LS_ACTIVITY_SEEN = 'altus_activity_seen_v1';
+
+function loadActivity() {
+  try { const s = JSON.parse(localStorage.getItem(LS_ACTIVITY)); if (Array.isArray(s)) return s; } catch (e) {}
+  return [];
+}
+function loadActivitySeen() {
+  try { return localStorage.getItem(LS_ACTIVITY_SEEN) || ''; } catch (e) { return ''; }
+}
+
+const _actMoney = (v) => (v == null || v === '' || isNaN(+v)) ? '—' :
+  (Math.abs(+v) >= 1e6 ? '$' + (+v / 1e6).toFixed(2) + 'M' :
+   Math.abs(+v) >= 1e3 ? '$' + Math.round(+v / 1e3) + 'K' : '$' + (+v));
+const _actNum = (v) => (v == null || v === '') ? '—' : String(v);
+const _actPct = (v) => (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toFixed(2) + '%';
+
+const ACT_FIELDS = [
+  ['stage', 'Stage', _actNum],
+  ['name', 'Name', _actNum],
+  ['market', 'Market', _actNum],
+  ['units', 'Units', _actNum],
+  ['vintage', 'Year built', _actNum],
+  ['askPrice', 'Guidance price', _actMoney],
+  ['purchasePrice', 'Offer price', _actMoney],
+  ['capex', 'CapEx', _actMoney],
+  ['exitCap', 'Exit cap', _actPct],
+  ['broker', 'Broker', _actNum],
+  ['cfoDate', 'CFO date', _actNum],
+  ['gprAnnual', 'GPR', _actMoney],
+  ['trailingEGI', 'EGI', _actMoney],
+  ['currentOpexTotal', 'OpEx', _actMoney],
+  ['brokerEGI', 'Pro forma EGI', _actMoney],
+  ['lpPref', 'LP pref', _actPct],
+  ['lpSplit', 'LP split', _actPct],
+];
+
+function describeDealChange(prev, next) {
+  const out = [];
+  ACT_FIELDS.forEach(([k, label, fmt]) => {
+    const a = prev[k], b = next[k];
+    if ((a == null ? '' : String(a)) === (b == null ? '' : String(b))) return;
+    out.push(label + ': ' + fmt(a) + ' → ' + fmt(b));
+  });
+  const pc = Array.isArray(prev.callLog) ? prev.callLog.length : 0;
+  const nc = Array.isArray(next.callLog) ? next.callLog.length : 0;
+  if (nc > pc) out.push((nc - pc) + ' broker call' + (nc - pc === 1 ? '' : 's') + ' logged');
+  if ((prev.notes || '') !== (next.notes || '')) out.push('Notes updated');
+  const ms = (d) => d && d.marketReview && d.marketReview.status;
+  if (ms(prev) !== ms(next) && ms(next) === 'done') out.push('Market review generated');
+  if (!(prev.memo && prev.memo.data) && (next.memo && next.memo.data)) out.push('IC memo drafted');
+  if (!out.length && JSON.stringify(prev) !== JSON.stringify(next)) out.push('Underwriting updated');
+  return out;
+}
+
+// Build activity entries from a before/after map of deals.
+function buildDealActivity(prevById, nextList, tsIso) {
+  const entries = [];
+  const nextIds = new Set();
+  nextList.forEach((d) => {
+    nextIds.add(d.id);
+    const prev = prevById[d.id];
+    if (!prev) {
+      entries.push({ id: 'a_' + d.id + '_new_' + tsIso, ts: tsIso, dealId: d.id,
+        dealName: d.name || 'Untitled deal', kind: 'added', text: 'Added to the pipeline' });
+      return;
+    }
+    describeDealChange(prev, d).forEach((text, i) => entries.push({
+      id: 'a_' + d.id + '_' + i + '_' + tsIso, ts: tsIso, dealId: d.id,
+      dealName: d.name || prev.name || 'Untitled deal', kind: 'changed', text }));
+  });
+  Object.values(prevById).forEach((p) => {
+    if (!nextIds.has(p.id)) entries.push({ id: 'a_' + p.id + '_del_' + tsIso, ts: tsIso,
+      dealId: null, dealName: p.name || 'Untitled deal', kind: 'removed', text: 'Removed from the pipeline' });
+  });
+  return entries;
+}
+
+function ChangeFeedBar({ items, open, onToggle, onDismiss, onOpenDeal }) {
+  if (!items.length) return null;
+  const KIND = { added: { c: '#0c7a43', l: 'New' }, removed: { c: '#c93c40', l: 'Removed' }, changed: { c: '#1f57c4', l: 'Updated' } };
+  const when = (ts) => { try { return new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } };
+  return (
+    <div style={{ background: '#eef3fd', borderBottom: '1px solid #cfdcf5', fontFamily: 'var(--font)' }}>
+      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '9px 30px', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1f57c4', flex: 'none' }} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#0d1f35' }}>
+          {items.length} change{items.length !== 1 ? 's' : ''} since you were last here
+        </span>
+        <span style={{ fontSize: 12.5, color: '#607080' }}>
+          across {new Set(items.map((i) => i.dealName)).size} deal{new Set(items.map((i) => i.dealName)).size !== 1 ? 's' : ''}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button onClick={onToggle} style={{ border: '1px solid #cfdcf5', background: '#fff', color: '#1f57c4',
+          borderRadius: 7, height: 28, padding: '0 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font)' }}>
+          {open ? 'Hide' : 'What changed?'}
+        </button>
+        <button onClick={onDismiss} title="Mark as read" style={{ border: 'none', background: 'none', color: '#8fa0b2',
+          fontSize: 16, lineHeight: 1, cursor: 'pointer', padding: 3 }}>✕</button>
+      </div>
+      {open && (
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 30px 12px' }}>
+          <div style={{ background: '#fff', border: '1px solid #cfdcf5', borderRadius: 9, overflow: 'hidden', maxHeight: 300, overflowY: 'auto' }}>
+            {items.slice(0, 80).map((it, i) => {
+              const k = KIND[it.kind] || KIND.changed;
+              return (
+                <div key={it.id} onClick={() => { if (it.dealId) onOpenDeal(it.dealId); }}
+                  style={{ display: 'grid', gridTemplateColumns: '132px 74px 1fr 2fr', gap: 12, alignItems: 'center',
+                    padding: '8px 14px', cursor: it.dealId ? 'pointer' : 'default',
+                    borderTop: i ? '1px solid #edf0f7' : 'none' }}>
+                  <span className="num" style={{ fontSize: 11.5, color: '#8fa0b2' }}>{when(it.ts)}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: k.c }}>{k.l}</span>
+                  <span className="clip" style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1f35' }}>{it.dealName}</span>
+                  <span style={{ fontSize: 12.5, color: '#41576e' }}>{it.text}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Top-of-screen toast — import / parse status (CoStar, docs, AI runs) ─────── */
+function TopToast({ toast, onClose }) {
+  if (!toast) return null;
+  const cfg = {
+    busy:  { bg: '#0d1f35', bd: '#1b3e60', fg: '#ffffff', sub: '#9fb4cf' },
+    ok:    { bg: '#0c7a43', bd: '#0a6538', fg: '#ffffff', sub: '#c9ecd8' },
+    error: { bg: '#c93c40', bd: '#ab3034', fg: '#ffffff', sub: '#fbd8d9' },
+  }[toast.kind] || { bg: '#0d1f35', bd: '#1b3e60', fg: '#fff', sub: '#9fb4cf' };
+  return (
+    <div style={{ position: 'fixed', top: 66, left: '50%', transform: 'translateX(-50%)', zIndex: 10000,
+      display: 'flex', alignItems: 'center', gap: 12, minWidth: 380, maxWidth: 620,
+      background: cfg.bg, border: '1px solid ' + cfg.bd, borderRadius: 11, padding: '11px 14px',
+      boxShadow: '0 12px 34px rgba(6,16,28,.32)', fontFamily: 'var(--font)' }}>
+      {toast.kind === 'busy' ? (
+        <span style={{ width: 18, height: 18, flex: 'none', borderRadius: '50%', border: '2.5px solid #6d9ae0',
+          borderTopColor: 'transparent', animation: 'spin .8s linear infinite' }} />
+      ) : (
+        <span style={{ width: 22, height: 22, flex: 'none', borderRadius: '50%', background: 'rgba(255,255,255,.18)',
+          color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={toast.kind === 'error' ? 'close' : 'check'} size={12} />
+        </span>
+      )}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: cfg.fg }}>{toast.title}</div>
+        {toast.sub && <div style={{ fontSize: 11.5, color: cfg.sub, marginTop: 2 }}>{toast.sub}</div>}
+      </div>
+      {toast.kind !== 'busy' && (
+        <button onClick={onClose} style={{ border: 'none', background: 'none', color: cfg.sub,
+          fontSize: 15, lineHeight: 1, cursor: 'pointer', padding: 3 }}>✕</button>
+      )}
+    </div>
+  );
+}
+
 function AltusApp() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [deals, setDeals] = useS(() => migrateDeals(loadDeals()));
@@ -2359,6 +2520,35 @@ function AltusApp() {
   const [saveState, setSaveState] = useS('idle'); // idle | dirty | saving | saved | error
   const saveStateRef = useR('idle');
 
+  // Activity feed — remote changes this browser hasn't shown yet.
+  const [activity, setActivity] = useS(loadActivity);
+  const [activitySeen, setActivitySeen] = useS(loadActivitySeen);
+  const [feedOpen, setFeedOpen] = useS(false);
+  const [toast, setToast] = useS(null);
+  useE(() => {
+    window.__altusToast = setToast;   // lets other modules surface the same top-of-screen status
+    return () => { delete window.__altusToast; };
+  }, []);
+  useE(() => {
+    if (!toast || toast.kind === 'busy') return undefined;
+    const id = setTimeout(() => setToast(null), toast.kind === 'error' ? 9000 : 6000);
+    return () => clearTimeout(id);
+  }, [toast]);
+  useE(() => {
+    try { localStorage.setItem(LS_ACTIVITY, JSON.stringify(activity.slice(0, 200))); } catch (e) {}
+  }, [activity]);
+  const pushActivity = (entries) => {
+    if (!entries || !entries.length) return;
+    setActivity((a) => [...entries, ...a].slice(0, 200));
+  };
+  const unseenActivity = activity.filter((a) => !activitySeen || a.ts > activitySeen);
+  const markActivitySeen = () => {
+    const now = new Date().toISOString();
+    setActivitySeen(now);
+    setFeedOpen(false);
+    try { localStorage.setItem(LS_ACTIVITY_SEEN, now); } catch (e) {}
+  };
+
   useE(() => {
     if (!cloud.requireLogin) { setSession(null); return; }
     let active = true;
@@ -2403,7 +2593,17 @@ function AltusApp() {
         return; // don't mark cloudLoaded — a later auth/session event gets another chance
       }
       cloudLoaded.current = true;
-      if (result.changed) setDeals(migrateDeals(result.items));
+      if (result.changed) {
+        const items = migrateDeals(result.items);
+        // Diff against what this browser last saw so the user can follow other people's
+        // saves made while they were away. Skipped on a genuinely empty first load.
+        const prevById = {};
+        (dealsRef.current || []).forEach((d) => { prevById[d.id] = d; });
+        if (Object.keys(prevById).length) {
+          pushActivity(buildDealActivity(prevById, items, new Date().toISOString()));
+        }
+        setDeals(items);
+      }
     }).catch((e) => console.warn('[cloud] load failed, using local data', e));
     return () => { active = false; };
   }, [session]);
@@ -2561,6 +2761,9 @@ function AltusApp() {
     return cloud.subscribeTable('deals', (payload) => {
       if (payload.eventType === 'DELETE') {
         const id = payload.old.id;
+        const gone = (dealsRef.current || []).find((d) => d.id === id);
+        if (gone) pushActivity([{ id: 'a_' + id + '_del_' + Date.now(), ts: new Date().toISOString(),
+          dealId: null, dealName: gone.name || 'Untitled deal', kind: 'removed', text: 'Removed from the pipeline' }]);
         setDeals((ds) => ds.filter((d) => d.id !== id));
         return;
       }
@@ -2569,6 +2772,20 @@ function AltusApp() {
       // via realtime after the user has already typed further, and applying it would
       // stomp those newer keystrokes with the older snapshot we ourselves just sent.
       if (justSavedDealsRef.current[incoming.id] === JSON.stringify(incoming)) return;
+      // Log the remote change for the "what changed" bar before applying it.
+      (() => {
+        const ts = new Date().toISOString();
+        const prev = (dealsRef.current || []).find((d) => d.id === incoming.id);
+        if (!prev) {
+          pushActivity([{ id: 'a_' + incoming.id + '_new_' + Date.now(), ts, dealId: incoming.id,
+            dealName: incoming.name || 'Untitled deal', kind: 'added', text: 'Added to the pipeline' }]);
+          return;
+        }
+        if (JSON.stringify(prev) === JSON.stringify(incoming)) return;
+        pushActivity(describeDealChange(prev, incoming).map((text, i) => ({
+          id: 'a_' + incoming.id + '_' + i + '_' + Date.now(), ts, dealId: incoming.id,
+          dealName: incoming.name || prev.name || 'Untitled deal', kind: 'changed', text })));
+      })();
       setDeals((ds) => {
         const existing = ds.find((d) => d.id === incoming.id);
         if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ds;
@@ -2744,8 +2961,13 @@ function AltusApp() {
           '"submarketContext":{"overallGrade":"B+","overallAssessment":"2 sentences.","comparables":[{"rank":1,"name":"submarket","crimeIndex":66,"label":"Safer","isSubject":false},{"rank":2,"name":"subject (Subject)","crimeIndex":82,"label":"Safer","isSubject":true},{"rank":3,"name":"submarket","crimeIndex":101,"label":"Similar","isSubject":false},{"rank":4,"name":"submarket","crimeIndex":112,"label":"Less Safe","isSubject":false}],"source":"sources"}}\n' +
           'Replace ALL values. grade options: A B+ B B- C+ C D. 4-6 comparables with subject marked isSubject:true. crimeIndex: 100=metro avg, lower=safer. label: Safer/Similar/Less Safe.';
 
-        const out2 = await aiComplete(p2, { maxTokens: 700 });
-        const r2 = safeParseJSON(out2);
+        const out2 = await aiComplete(p2, { maxTokens: 1800 });
+        let r2 = safeParseJSON(out2);
+        if (!r2) {   // one retry — truncation or stray prose is the usual cause
+          const out2b = await aiComplete(p2 + '\nJSON only. Keep every string under 200 characters so the object is complete.', { maxTokens: 1800 });
+          r2 = safeParseJSON(out2b);
+        }
+        if (!r2) throw new Error('Could not parse economic drivers / submarket context.');
         if (r2) {
           const fresh = (dealsRef.current || []).find((x) => x.id === dealId);
           const freshMR = (fresh && fresh.marketReview) || {};
@@ -2754,14 +2976,60 @@ function AltusApp() {
             ...freshData,
             economicDrivers:  r2.economicDrivers  || {},
             submarketContext: r2.submarketContext  || {},
-          }}});
+          }, phase2Error: null }});
         }
       } catch (e2) {
         console.warn('[MarketReview] Phase 2 failed:', e2 && e2.message);
+        const fresh2 = (dealsRef.current || []).find((x) => x.id === dealId);
+        const mr2 = (fresh2 && fresh2.marketReview) || {};
+        patch(dealId, { marketReview: { ...mr2, phase2Error: String(e2 && e2.message ? e2.message : e2) } });
       }
 
     } catch (e) {
       patch(dealId, { marketReview: { status: 'error', error: String(e && e.message ? e.message : e) } });
+    }
+  };
+
+  // ── CoStar import ── parse a downloaded CoStar PDF/Excel export and fold its
+  // submarket metrics into the Property & Location Review.
+  const importCoStar = async (dealId, file) => {
+    const d = (dealsRef.current || deals).find((x) => x.id === dealId);
+    if (!d || !file) return;
+    setToast({ kind: 'busy', title: 'Reading ' + file.name + '…', sub: 'Extracting CoStar submarket metrics' });
+    try {
+      const raw = await extractFileText(file);
+      if (!raw || !raw.trim()) throw new Error('No readable text in that file.');
+      const text = focusExcerpt(raw, ['vacancy', 'asking rent', 'rent growth', 'net absorption',
+        'under construction', 'inventory', 'market cap rate', 'sale comps', 'price/unit',
+        'submarket', '12 mo', 'forecast'], 14000);
+      const prompt = 'You are reading a CoStar export for ' + (d.name || 'a multifamily property') +
+        (d.market ? ' in ' + d.market : '') + '. Extract the submarket / market data.\n' +
+        'Return ONLY JSON (no markdown):\n' +
+        '{"asOf":"Q2 2026","submarket":"submarket name","metrics":{"vacancy":"5.4%","vacancy12moChange":"+40 bps",' +
+        '"askingRent":"$1,285","rentGrowth12mo":"+2.1%","rentGrowthForecast":"+3.0%","absorption12mo":"312 units",' +
+        '"underConstruction":"1,450 units","inventory":"24,300 units","constructionPctInventory":"6.0%",' +
+        '"marketCapRate":"5.4%","pricePerUnit":"$168,000","salesVolume12mo":"$412M"},' +
+        '"comps":[{"name":"Property","units":248,"vintage":2003,"askingRent":"$1,240","vacancy":"6.1%"}],' +
+        '"takeaways":["1 sentence.","1 sentence.","1 sentence."]}\n' +
+        'Use ONLY figures present in the document; omit any key you cannot find (do not invent). ' +
+        'Up to 8 comps. Keep values formatted as shown.\n\nCOSTAR EXPORT:\n' + text;
+      const out = await aiComplete(prompt, { maxTokens: 1400 });
+      const parsed = safeParseJSON(out);
+      if (!parsed) throw new Error('Could not parse the CoStar export.');
+      const costar = { ...parsed, fileName: file.name,
+        importedAt: new Date().toISOString(), source: 'CoStar — ' + file.name };
+      const fresh = (dealsRef.current || []).find((x) => x.id === dealId) || d;
+      const mr = fresh.marketReview || {};
+      patch(dealId, { marketReview: { ...mr, status: 'done',
+        generatedAt: mr.generatedAt || new Date().toISOString(),
+        data: { ...(mr.data || {}), costar } } });
+      const nMetrics = Object.keys(parsed.metrics || {}).length;
+      const nComps = Array.isArray(parsed.comps) ? parsed.comps.length : 0;
+      setToast({ kind: 'ok', title: 'CoStar data added to the report',
+        sub: file.name + ' · ' + (parsed.submarket ? parsed.submarket + ' · ' : '') + (parsed.asOf || 'current') +
+          ' · ' + nMetrics + ' metric' + (nMetrics === 1 ? '' : 's') + (nComps ? ' · ' + nComps + ' comps' : '') });
+    } catch (e) {
+      setToast({ kind: 'error', title: "Couldn't import that CoStar file", sub: String(e && e.message ? e.message : e) });
     }
   };
 
@@ -3097,6 +3365,12 @@ ${text}`;
         </div>
       )}
 
+      <TopToast toast={toast} onClose={() => setToast(null)} />
+
+      <ChangeFeedBar items={unseenActivity} open={feedOpen}
+        onToggle={() => setFeedOpen((v) => !v)} onDismiss={markActivitySeen}
+        onOpenDeal={(id) => { open(id); setView('pipeline'); }} />
+
       <main ref={mainRef} style={{ flex: 1, overflow: 'auto', position: 'relative', fontFamily: 'var(--font)' }} data-comment-anchor="922d83631c-main-640-7">
         {deal ? <DealDetail deal={deal} onBack={() => setOpenId(null)} onPatch={patch} contacts={contacts}
         omData={omMap[deal.id]} onAcceptOM={acceptOM}
@@ -3104,7 +3378,7 @@ ${text}`;
         t12Data={t12Map[deal.id]} rrData={rrMap[deal.id]}
         onT12Upload={handleT12Upload} onRRUpload={handleRentRollUpload}
         onClearOM={clearOM} onClearT12={clearT12} onClearRR={clearRR}
-        onRunMarketReview={runMarketReview} onRunMemo={runMemoNarrative}
+        onRunMarketReview={runMarketReview} onRunMemo={runMemoNarrative} onImportCoStar={importCoStar}
         todos={todos} onAddTodo={addTodo} onPatchTodo={patchTodo} onDeleteTodo={deleteTodo}
         onViewTasks={() => { setOpenId(null); setView('tasks'); }} /> :
         view === 'pipeline' ? <PipelineView deals={pipelineDeals} allDeals={deals} onOpen={open} onPatch={patch}

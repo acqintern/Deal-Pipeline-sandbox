@@ -32,6 +32,20 @@ function SHead({ num, title, sub }) {
     </div>
   );
 }
+function MRGap({ msg, onRun }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 16px', borderRadius:9,
+      background:'var(--panel-2)', border:'1px dashed var(--line-2)' }}>
+      <div style={{ flex:1, fontSize:12, color:'var(--muted)', lineHeight:1.55 }}>{msg}</div>
+      {onRun && <button onClick={onRun}
+        style={{ flex:'none', border:'1px solid var(--line-2)', background:'var(--panel)', color:'var(--accent)',
+          borderRadius:7, padding:'6px 12px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>
+        Re-run analysis
+      </button>}
+    </div>
+  );
+}
+
 function Bullets({ items, color='var(--accent)' }) {
   return (
     <ul style={{ margin:0, padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:4 }}>
@@ -179,13 +193,14 @@ const SAMPLE_MR = {
 };
 
 /* ─── Main tab component ─────────────────────────────────────────────── */
-function MarketReviewTab({ deal, onRun }) {
+function MarketReviewTab({ deal, onRun, onImportCoStar }) {
   const mr      = deal.marketReview;
   const status  = mr && mr.status;
   const [busy, setBusy]       = useSM(false);
   const [preview, setPreview] = useSM(false);
   const run = async () => { setBusy(true); try { await onRun(deal.id); } finally { setBusy(false); } };
   const running       = busy || status === 'running';
+  const emptyCsRef    = React.useRef(null);
   const displayMR     = preview ? SAMPLE_MR : mr;
   const displayStatus = preview ? 'done' : status;
 
@@ -221,11 +236,22 @@ function MarketReviewTab({ deal, onRun }) {
             ) : <>{displayMR.error || 'Something went wrong.'} — try again.</>}
           </div>
         )}
-        <button onClick={run} disabled={running}
-          style={{ marginTop:20, border:'none', background:'var(--accent)', color:'#fff',
-            borderRadius:9, padding:'11px 22px', fontSize:14, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>
-          {displayStatus === 'error' ? 'Retry analysis' : 'Run analysis with Claude'}
-        </button>
+        <div style={{ marginTop:20, display:'flex', gap:9, justifyContent:'center', flexWrap:'wrap' }}>
+          <button onClick={run} disabled={running}
+            style={{ border:'none', background:'var(--accent)', color:'#fff',
+              borderRadius:9, padding:'11px 22px', fontSize:14, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>
+            {displayStatus === 'error' ? 'Retry analysis' : 'Run analysis with Claude'}
+          </button>
+          {onImportCoStar && <>
+            <input ref={emptyCsRef} type="file" accept=".pdf,.xlsx,.xls,.xlsm,.csv" style={{ display:'none' }}
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value=''; if (f) onImportCoStar(deal.id, f); }} />
+            <button onClick={() => emptyCsRef.current && emptyCsRef.current.click()}
+              style={{ border:'1px solid var(--line-2)', background:'var(--panel)', color:'var(--slate)',
+                borderRadius:9, padding:'11px 20px', fontSize:14, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>
+              Import CoStar file
+            </button>
+          </>}
+        </div>
         <div style={{ marginTop:12 }}>
           <button onClick={() => setPreview(true)}
             style={{ border:'none', background:'none', color:'var(--accent)', fontSize:12.5,
@@ -250,18 +276,27 @@ function MarketReviewTab({ deal, onRun }) {
     );
   }
 
-  const d    = displayMR.data || {};
+  return <MarketReviewReport deal={deal} mr={displayMR} preview={preview}
+    onRun={!preview ? run : null} onExitPreview={preview ? (() => setPreview(false)) : null}
+    onImportCoStar={onImportCoStar} />;
+}
+
+/* ─── Report body — shared by the tab and page 2 of the IC memo ───────── */
+function MarketReviewReport({ deal, mr: displayMR, preview, onRun, onExitPreview, maxWidth, onImportCoStar }) {
+  const d    = (displayMR && displayMR.data) || {};
   const sent  = d.residentSentiment  || {};
   const crime = d.crimeSnapshot      || {};
   const econ  = d.economicDrivers    || {};
   const sub   = d.submarketContext   || {};
-  const genDate = displayMR.generatedAt
+  const costar = d.costar || null;
+  const csFileRef = React.useRef(null);
+  const genDate = displayMR && displayMR.generatedAt
     ? new Date(displayMR.generatedAt).toLocaleDateString('en-US',{month:'short',year:'numeric'})
     : '';
   const EMP_W = { large:100, medium:62, small:35 };
 
   return (
-    <div style={{ maxWidth:1060, margin:'0 auto', borderRadius:'var(--radius-lg)', overflow:'hidden',
+    <div style={{ maxWidth:maxWidth||1060, margin:'0 auto', borderRadius:'var(--radius-lg)', overflow:'hidden',
       border:'1px solid var(--line)', boxShadow:'var(--shadow-lg)' }}>
 
       {/* ── Header ── */}
@@ -280,8 +315,16 @@ function MarketReviewTab({ deal, onRun }) {
             </div>
           ))}
           <div style={{ display:'flex', gap:6, marginLeft:8 }}>
-            {!preview && <button onClick={run} style={{ border:'1px solid rgba(255,255,255,.18)', background:'rgba(255,255,255,.07)', color:'#9fb4cf', borderRadius:7, padding:'5px 12px', fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>Re-run</button>}
-            {preview  && <button onClick={() => setPreview(false)} style={{ border:'1px solid rgba(255,255,255,.18)', background:'rgba(255,255,255,.07)', color:'#9fb4cf', borderRadius:7, padding:'5px 12px', fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>Exit sample</button>}
+            {onImportCoStar && <>
+              <input ref={csFileRef} type="file" accept=".pdf,.xlsx,.xls,.xlsm,.csv" style={{ display:'none' }}
+                onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value=''; if (f) onImportCoStar(deal.id, f); }} />
+              <button onClick={() => csFileRef.current && csFileRef.current.click()}
+                style={{ border:'1px solid rgba(255,255,255,.18)', background:'rgba(255,255,255,.07)', color:'#cfe0f5', borderRadius:7, padding:'5px 12px', fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>
+                Import CoStar file
+              </button>
+            </>}
+            {onRun && <button onClick={onRun} style={{ border:'1px solid rgba(255,255,255,.18)', background:'rgba(255,255,255,.07)', color:'#9fb4cf', borderRadius:7, padding:'5px 12px', fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>Re-run</button>}
+            {onExitPreview && <button onClick={onExitPreview} style={{ border:'1px solid rgba(255,255,255,.18)', background:'rgba(255,255,255,.07)', color:'#9fb4cf', borderRadius:7, padding:'5px 12px', fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>Exit sample</button>}
           </div>
         </div>
       </div>
@@ -362,6 +405,11 @@ function MarketReviewTab({ deal, onRun }) {
         {/* §3 Economic Drivers */}
         <div style={{ background:'var(--panel)', padding:'18px 20px' }}>
           <SHead num="3" title="Economic Drivers" />
+          {!econ.capitalInjections && !econ.majorEmployers && !econ.populationTrend ? (
+            <MRGap msg={displayMR && displayMR.phase2Error
+              ? 'Economic drivers didn’t come back from the last run.'
+              : 'Economic drivers haven’t been generated yet.'} onRun={onRun} />
+          ) : (
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:18 }}>
             <div>
               <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', letterSpacing:'.06em', textTransform:'uppercase', marginBottom:8 }}>Recent Capital Injections</div>
@@ -396,12 +444,18 @@ function MarketReviewTab({ deal, onRun }) {
               ))}
             </div>
           </div>
+          )}
           <Src text={econ.source} deal={deal} />
         </div>
 
         {/* §4 Submarket Context */}
         <div style={{ background:'var(--panel)', padding:'18px 20px' }}>
           <SHead num="4" title="Submarket Context / Key Takeaway" />
+          {!sub.overallAssessment && !(sub.comparables||[]).length ? (
+            <MRGap msg={displayMR && displayMR.phase2Error
+              ? 'Submarket context and key takeaway didn’t come back from the last run.'
+              : 'Submarket context hasn’t been generated yet.'} onRun={onRun} />
+          ) : (
           <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:14, alignItems:'start' }}>
             <div>
               <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', letterSpacing:'.05em', textTransform:'uppercase', marginBottom:7 }}>
@@ -443,15 +497,80 @@ function MarketReviewTab({ deal, onRun }) {
               </div>
             </div>
           </div>
+          )}
           <Src text={sub.source} deal={deal} />
         </div>
       </div>
+
+      {/* §5 CoStar Market Data (only when a CoStar export has been imported) */}
+      {costar && (() => {
+        const M = costar.metrics || {};
+        const TILES = [
+          ['Vacancy', M.vacancy, M.vacancy12moChange],
+          ['Asking Rent', M.askingRent, M.rentGrowth12mo ? M.rentGrowth12mo + ' 12-mo' : ''],
+          ['Rent Growth Forecast', M.rentGrowthForecast, ''],
+          ['Net Absorption (12 mo)', M.absorption12mo, ''],
+          ['Under Construction', M.underConstruction, M.constructionPctInventory ? M.constructionPctInventory + ' of inventory' : ''],
+          ['Inventory', M.inventory, ''],
+          ['Market Cap Rate', M.marketCapRate, ''],
+          ['Price / Unit', M.pricePerUnit, M.salesVolume12mo ? M.salesVolume12mo + ' 12-mo volume' : ''],
+        ].filter(([,v]) => v);
+        return (
+          <div style={{ background:'var(--panel)', padding:'18px 20px', borderTop:'1px solid var(--line)' }}>
+            <SHead num="5" title="CoStar Market Data"
+              sub={[costar.submarket, costar.asOf].filter(Boolean).join(' · ')} />
+            {TILES.length > 0 && (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:1, background:'var(--line)',
+                border:'1px solid var(--line)', borderRadius:9, overflow:'hidden', marginBottom:14 }}>
+                {TILES.map(([l,v,h]) => (
+                  <div key={l} style={{ background:'var(--panel)', padding:'11px 13px' }}>
+                    <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase', color:'var(--muted)', marginBottom:4 }}>{l}</div>
+                    <div className="num" style={{ fontSize:18, fontWeight:700, color:'var(--ink)', lineHeight:1 }}>{v}</div>
+                    {h && <div style={{ fontSize:10.5, color:'var(--faint)', marginTop:3 }}>{h}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display:'grid', gridTemplateColumns: (costar.takeaways||[]).length ? '1.5fr 1fr' : '1fr', gap:16 }}>
+              {Array.isArray(costar.comps) && costar.comps.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', letterSpacing:'.06em', textTransform:'uppercase', marginBottom:7 }}>Comp Set</div>
+                  <div style={{ border:'1px solid var(--line)', borderRadius:8, overflow:'hidden' }}>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 58px 62px 82px 68px', gap:8, padding:'6px 12px',
+                      background:'var(--panel-3)', fontSize:9.5, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:'var(--muted)' }}>
+                      <span>Property</span><span style={{ textAlign:'right' }}>Units</span><span style={{ textAlign:'right' }}>Built</span>
+                      <span style={{ textAlign:'right' }}>Ask Rent</span><span style={{ textAlign:'right' }}>Vac</span>
+                    </div>
+                    {costar.comps.slice(0,8).map((c,i) => (
+                      <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 58px 62px 82px 68px', gap:8, padding:'7px 12px',
+                        borderTop:'1px solid var(--line)', background: i%2 ? 'var(--panel-2)' : 'var(--panel)', fontSize:12 }}>
+                        <span className="clip" style={{ color:'var(--ink)' }}>{c.name}</span>
+                        <span className="num" style={{ textAlign:'right', color:'var(--slate)' }}>{c.units || '—'}</span>
+                        <span className="num" style={{ textAlign:'right', color:'var(--slate)' }}>{c.vintage || '—'}</span>
+                        <span className="num" style={{ textAlign:'right', color:'var(--ink)', fontWeight:600 }}>{c.askingRent || '—'}</span>
+                        <span className="num" style={{ textAlign:'right', color:'var(--slate)' }}>{c.vacancy || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {Array.isArray(costar.takeaways) && costar.takeaways.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', letterSpacing:'.06em', textTransform:'uppercase', marginBottom:7 }}>What It Means</div>
+                  <Bullets items={costar.takeaways} color="var(--accent)" />
+                </div>
+              )}
+            </div>
+            <Src text={costar.source} deal={deal} />
+          </div>
+        );
+      })()}
 
       {/* Footer */}
       <div style={{ background:'var(--panel-2)', padding:'8px 22px', display:'flex', justifyContent:'space-between', alignItems:'center', borderTop:'1px solid var(--line)' }}>
         <div style={{ fontSize:10.5, color: preview ? 'var(--warn)' : 'var(--faint)' }}>
           {preview ? '⚠ Sample data — run analysis to generate real data for this property' :
-            'Generated ' + (displayMR.generatedAt ? new Date(displayMR.generatedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '') +
+            'Generated ' + (displayMR && displayMR.generatedAt ? new Date(displayMR.generatedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '') +
             ' · AI-estimated · verify material figures before IC'}
         </div>
         <div style={{ fontSize:10.5, color:'var(--faint)', fontWeight:600, letterSpacing:'.04em' }}>CONFIDENTIAL — FOR INTERNAL USE ONLY</div>
@@ -460,4 +579,4 @@ function MarketReviewTab({ deal, onRun }) {
   );
 }
 
-window.MarketReviewTab = MarketReviewTab;
+Object.assign(window, { MarketReviewTab, MarketReviewReport });

@@ -647,8 +647,15 @@ function MiniNotes({ deal, set }) {
 }
 
 /* ───────────── Portfolio: Full UW tab wrapper ───────────── */
-function PortfolioUWTab({ deal, set, view, setView, setProperties }) {
+function PortfolioUWTab({ deal, set, view, setView, setProperties, excluded = {}, setExcluded, stickyTop = 0 }) {
   const props = deal.properties || [];
+  const included = props.filter((p, i) => !excluded[p.id || i]);
+  const toggleInc = (p, i) => setExcluded((e) => {
+    const k = p.id || i;
+    const n = { ...e };
+    if (n[k]) delete n[k]; else n[k] = true;
+    return n;
+  });
   const propSet = (idx) => (k, v) => {
     const arr = [...props];
     arr[idx] = { ...arr[idx], ...(typeof k === 'object' ? k : { [k]: v }) };
@@ -660,16 +667,56 @@ function PortfolioUWTab({ deal, set, view, setView, setProperties }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <MiniNotes deal={deal} set={set} />
       <PropertyUWSwitcher props={props} view={view} setView={setView} />
+      {safeIdx != null &&
+        <div style={{ position: 'sticky', top: stickyTop, zIndex: 12, display: 'flex', alignItems: 'center', gap: 10,
+          background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 8, padding: '9px 14px',
+          fontSize: 12.5, boxShadow: '0 2px 8px rgba(15,23,32,.06)' }}>
+          <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{props[safeIdx].name || 'Property ' + (safeIdx + 1)}</span>
+          <span style={{ color: 'var(--faint)' }}>·</span>
+          <span className="num" style={{ color: 'var(--muted)' }}>{props[safeIdx].vintage ? 'Built ' + props[safeIdx].vintage : 'Vintage —'}</span>
+          <span style={{ color: 'var(--faint)' }}>·</span>
+          <span style={{ color: 'var(--muted)' }}>{props[safeIdx].market || '—'}</span>
+        </div>}
+      {safeIdx == null &&
+        <Card>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Properties in combined view</div>
+              <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 2 }}>{included.length} of {props.length} included · uncheck to model a partial portfolio</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setExcluded({})} style={{ border: '1px solid var(--line-2)', background: 'var(--panel)', color: 'var(--slate)', borderRadius: 7, padding: '5px 11px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>Select all</button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+            {props.map((p, i) => {
+              const on = !excluded[p.id || i];
+              return (
+                <button key={p.id || i} onClick={() => toggleInc(p, i)} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  border: on ? '1px solid var(--accent)' : '1px solid var(--line-2)',
+                  background: on ? 'var(--accent-soft)' : 'var(--panel)', color: on ? 'var(--accent)' : 'var(--faint)',
+                  borderRadius: 999, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  <span style={{ width: 13, height: 13, borderRadius: 3, flex: 'none',
+                    border: on ? '1px solid var(--accent)' : '1px solid var(--line-2)',
+                    background: on ? 'var(--accent)' : 'transparent', color: '#fff',
+                    fontSize: 10, lineHeight: '13px', textAlign: 'center' }}>{on ? '✓' : ''}</span>
+                  {p.name || 'Property ' + (i + 1)}
+                </button>
+              );
+            })}
+          </div>
+        </Card>}
       {safeIdx != null
         ? <PropertyFullUW key={props[safeIdx].id || safeIdx} property={props[safeIdx]} onChange={propSet(safeIdx)} />
-        : <CombinedUWView deal={deal} set={set} />}
+        : <CombinedUWView deal={{ ...deal, properties: included }} set={set} />}
     </div>
   );
 }
 
-function FullUnderwritingTab({ deal, set, propView, setPropView, setProperties }) {
+function FullUnderwritingTab({ deal, set, propView, setPropView, setProperties, excluded, setExcluded, stickyTop }) {
   const isPortfolio = !!deal.isPortfolio && Array.isArray(deal.properties) && deal.properties.length > 1;
-  if (isPortfolio) return <PortfolioUWTab deal={deal} set={set} view={propView} setView={setPropView} setProperties={setProperties} />;
+  if (isPortfolio) return <PortfolioUWTab deal={deal} set={set} view={propView} setView={setPropView} setProperties={setProperties} excluded={excluded} setExcluded={setExcluded} stickyTop={stickyTop} />;
   const m = computeMetrics(deal);
   const uw = computeUW(deal);
   return (
