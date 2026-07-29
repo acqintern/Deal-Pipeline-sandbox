@@ -168,37 +168,24 @@ function ScenarioAnalysis({ deal, uw }) {
     </div>
   );
 
+  // Mirrors the Returns tab exactly: all three cases run on Bridge-to-HUD financing so
+  // they're comparable; only growth / stabilization / exit assumptions vary.
   const run = (ov) => { try { return window.computeScenario ? window.computeScenario(deal, ov) : null; } catch(e) { return null; } };
-
-  // deal-level override fields are percent-scale numbers (e.g. 3 = 3%), while uw.* are decimals — convert before feeding back into computeScenario
-  const gprPct  = (uw.gprGrowth||0.03)*100;
-  const opexPct = (uw.opexGrowth||0.025)*100;
-  const exitPct = (uw.exitCap||0.065)*100;
-  const weakGpr = Math.max(0,gprPct-1), weakOpex = opexPct+1, weakExit = exitPct+0.5;
-  const bestGpr = gprPct+1, bestOpex = Math.max(0,opexPct-0.5), bestExit = Math.max(4,exitPct-0.25);
+  const baseExit = (deal.exitCap == null || deal.exitCap === '') ? 6 : Number(deal.exitCap);
+  const bridgeToHUD = {
+    acqFin: { mode:'new', scenario:'Bridge to HUD', new:{ basis:'LTC', pct:70, rate:6.25, amYears:30, ioYears:3 } },
+    refi:   { enabled:true, year:3, cap:6, ltv:80, rate:6, amYears:35, ioYears:0, costPct:2 },
+  };
+  const inPlaceVac = window.inPlaceVacPct ? window.inPlaceVacPct(deal) : 0;
 
   const scenarios = [
-    { label:'WEAK', color:IC.neg,
-      desc:`Rent ${weakGpr.toFixed(1)}% · OpEx ${weakOpex.toFixed(1)}% · Exit ${weakExit.toFixed(2)}%`,
-      r: run({ gprGrowth:weakGpr, opexGrowth:weakOpex, exitCap:weakExit }) },
-    { label:'BASE', color:IC.navy,
-      desc:'Current underwriting assumptions',
-      r: { dealIRR:uw.irr, equityMultiple:uw.equityMultiple, avgDealYield:uw.avgYield,
-           lpIRR:null, avgLpYield:null, lpMultiple:null, gpPromote:null } },
-    { label:'BEST', color:IC.pos,
-      desc:`Rent ${bestGpr.toFixed(1)}% · OpEx ${bestOpex.toFixed(1)}% · Exit ${bestExit.toFixed(2)}%`,
-      r: run({ gprGrowth:bestGpr, opexGrowth:bestOpex, exitCap:bestExit }) },
+    { label:'WEAK', color:IC.neg, desc:'Bridge→HUD · EGI +1% / OpEx +1% · no stabilization',
+      r: run({ ...bridgeToHUD, gprGrowth:1, opexGrowth:1, stabEconVac:inPlaceVac, stabYear:1 }) },
+    { label:'BASE', color:IC.navy, desc:'Bridge→HUD at purchase · current growth/exit',
+      r: run({ ...bridgeToHUD }) },
+    { label:'BEST', color:IC.pos, desc:'Bridge→HUD · rent +4% / exp +2% · exit −25 bps',
+      r: run({ ...bridgeToHUD, gprGrowth:4, opexGrowth:2, exitCap:baseExit-0.25 }) },
   ];
-
-  // Augment BASE with LP data
-  if (window.computeLP) {
-    try {
-      const lp = window.computeLP(uw, { pref:deal.lpPref, split:deal.lpSplit });
-      if (lp) Object.assign(scenarios[1].r, {
-        lpIRR:lp.lpIRR, avgLpYield:lp.avgLpYield, lpMultiple:lp.lpMultiple, gpPromote:lp.gpPromote
-      });
-    } catch(e) {}
-  }
 
   const hasLP = scenarios.some(s => s.r && s.r.lpIRR != null);
   const hasGP = scenarios.some(s => s.r && s.r.gpPromote != null);
@@ -221,6 +208,7 @@ function ScenarioAnalysis({ deal, uw }) {
       { type:'section', label:'GP RETURNS' },
       { type:'row', label:'Total GP Promote',   fmt:(r,i)=>r&&r.gpPromote!=null?_m(r.gpPromote):'—',   scIdx:true },
     ] : []),
+    { type:'row', label:'Avg Cash-on-Cash Return', fmt:(r,i)=>r&&r.uw&&r.uw.avgYield!=null?_p(r.uw.avgYield):'—', bold:true },
   ];
 
   return (
@@ -377,101 +365,15 @@ function OperatingForecast({ uw }) {
 }
 
 // ─── Bullet ───────────────────────────────────────────────────────────────────
-function ICMemoPage2({ deal, mr }) {
-  const sent  = mr.residentSentiment || {};
-  const crime = mr.crimeSnapshot || {};
-  const econ  = mr.economicDrivers || {};
-  const sub   = mr.submarketContext || {};
-  const panel = { background:IC.panel, border:'1px solid '+IC.line, borderRadius:5, overflow:'hidden' };
-  const gradeColor = (sub.overallGrade||'').startsWith('A')?IC.pos:(sub.overallGrade||'').startsWith('B')?IC.blue:(sub.overallGrade||'').startsWith('C')?IC.warn:IC.faint;
-
+function ICMemoPage2({ deal }) {
+  const R = window.MarketReviewReport;
   return (
-    <div id="ic-memo-page2" style={{ width:1020, height:1320, boxSizing:'border-box', overflow:'hidden',
-      background:IC.bg, color:IC.navy, fontFamily:IC.sans, WebkitFontSmoothing:'antialiased' }}>
-      <div style={{ padding:'14px 24px 12px', borderBottom:'2px solid '+IC.navy, background:'#fff',
-        display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16 }}>
-        <div>
-          <div style={{ fontSize:9.5, letterSpacing:'.1em', textTransform:'uppercase',
-            color:IC.faint, fontWeight:600, marginBottom:3 }}>
-            Altus Equity — Investment Committee Memo — Confidential
-          </div>
-          <div style={{ fontSize:19, fontWeight:700, color:IC.navy, lineHeight:1.15, fontFamily:IC.serif }}>
-            Submarket & Location Review — {deal.name||'Untitled Deal'}
-          </div>
-        </div>
-        {sub.overallGrade && (
-          <div style={{ fontSize:11, color:IC.muted, whiteSpace:'nowrap' }}>Submarket Grade: <strong style={{ color:IC.navy }}>{sub.overallGrade}</strong></div>
-        )}
-      </div>
-
-      <div style={{ padding:'5px', display:'flex', flexDirection:'column', gap:5 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 }}>
-          <div style={panel}>
-            <PanelHdr>Resident Sentiment</PanelHdr>
-            <div style={{ padding:'6px 11px 8px' }}>
-              <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:6 }}>
-                <span style={{ fontSize:20, fontWeight:700, color:IC.navy }}>{sent.rating!=null?sent.rating.toFixed(1):'—'}</span>
-                <span style={{ fontSize:10, color:IC.muted }}>{sent.reviewCount?sent.reviewCount+' reviews · ':''}{sent.trend||''}</span>
-              </div>
-              {(sent.positives||[]).slice(0,3).map((t,i)=><Bul key={'p'+i} text={t} tone="pos" />)}
-              {(sent.negatives||[]).slice(0,3).map((t,i)=><Bul key={'n'+i} text={t} tone="neg" />)}
-            </div>
-          </div>
-          <div style={panel}>
-            <PanelHdr>Crime Snapshot (vs. Metro)</PanelHdr>
-            <div style={{ padding:'6px 11px 8px' }}>
-              {[['Overall', crime.overall], ['Violent Crime', crime.violentCrime], ['Property Crime', crime.propertyCrime]]
-                .filter(([,c])=>c).map(([lbl,c])=>
-                  <DR key={lbl} label={lbl} value={(c.label||'—')+(c.vsMetro?' · '+c.vsMetro:'')} />
-                )}
-              {(crime.investmentImplication||[]).slice(0,2).map((t,i)=><Bul key={i} text={t} />)}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 }}>
-          <div style={panel}>
-            <PanelHdr>Economic Drivers</PanelHdr>
-            <div style={{ padding:'6px 11px 8px' }}>
-              {(econ.capitalInjections||[]).slice(0,4).map((c,i)=>
-                <DR key={i} label={c.name} value={c.amount} />
-              )}
-              {econ.populationTrend && (
-                <div style={{ marginTop:6, fontSize:10, color:IC.muted, lineHeight:1.4 }}>
-                  Population {econ.populationTrend.cagr5yr} 5-yr CAGR — {econ.populationTrend.vsState}
-                </div>
-              )}
-            </div>
-          </div>
-          <div style={panel}>
-            <PanelHdr>Submarket Context</PanelHdr>
-            <div style={{ padding:'6px 11px 8px' }}>
-              {sub.overallAssessment && (
-                <div style={{ fontSize:11, lineHeight:1.5, color:IC.navy, marginBottom:8 }}>{sub.overallAssessment}</div>
-              )}
-              {(sub.comparables||[]).length>0 && (
-                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:10.5 }}>
-                  <tbody>
-                    {sub.comparables.slice(0,6).map((c) => (
-                      <tr key={c.rank} style={{ background:c.isSubject?IC.line2:'transparent' }}>
-                        <td style={{ padding:'2px 6px', color:IC.muted, width:20 }}>{c.rank}</td>
-                        <td style={{ padding:'2px 6px', fontWeight:c.isSubject?700:500, color:IC.navy }}>{c.name}</td>
-                        <td style={{ padding:'2px 6px', textAlign:'right', color:gradeColor, fontWeight:600 }}>{c.label}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ borderTop:'1px solid '+IC.line, background:'#f4f6f9', padding:'5px 18px',
-        display:'flex', justifyContent:'space-between', fontSize:8.5, color:IC.faint }}>
-        <span>Altus Equity — For Investment Committee use only.</span>
-        <span>Independent read · verify material figures before IC</span>
-      </div>
+    <div id="ic-memo-page2" style={{ width:1100, boxSizing:'border-box',
+      background:IC.bg, padding:'20px', fontFamily:'var(--font)' }}>
+      {R ? <R deal={deal} mr={deal.marketReview} maxWidth={1060} /> :
+        <div style={{ padding:40, textAlign:'center', fontSize:12, color:IC.faint }}>
+          Submarket report unavailable.
+        </div>}
     </div>
   );
 }
@@ -762,7 +664,7 @@ function ICMemoButton({ deal, onRunMemo, onRunMarketReview }) {
               {mr && (
                 <div style={{ boxShadow:'0 24px 64px rgba(0,0,0,.5)', borderRadius:8,
                   overflow:'hidden', maxWidth:'94vw', marginTop:20 }}>
-                  <ICMemoPage2 deal={deal} mr={mr} />
+                  <ICMemoPage2 deal={deal} />
                 </div>
               )}
             </React.Fragment>
