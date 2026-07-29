@@ -195,6 +195,11 @@ function DocumentVault({ deal, set }) {
         error: 'Supabase storage isn’t connected — documents only upload to the cloud. Sign in on the live dashboard and add it there.' })));
       return;
     }
+    // Track the running list locally rather than reading deal.documents inside the loop —
+    // deal is a stale closure for the duration of this call, so appending off the prop on
+    // each iteration made every file but the last overwrite the ones before it whenever
+    // more than one file (e.g. a multi-file CoStar export) was added in the same batch.
+    let current = Array.isArray(deal.documents) ? deal.documents : [];
     for (const file of files) {
       const key = file.name + '_' + Date.now() + Math.random();
       setUploads((u) => [...u, { key, name: file.name, status: 'uploading' }]);
@@ -202,7 +207,8 @@ function DocumentVault({ deal, set }) {
         const meta = await cloud.uploadDoc(deal.id, file);
         const entry = { id: 'doc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           ...meta, category: category || guessCat(file.name) };
-        set('documents', [...(Array.isArray(deal.documents) ? deal.documents : []), entry]);
+        current = [...current, entry];
+        set('documents', current);
         setUploads((u) => u.map((x) => x.key === key ? { ...x, status: 'done' } : x));
         setTimeout(() => setUploads((u) => u.filter((x) => x.key !== key)), 1500);
       } catch (e) {
