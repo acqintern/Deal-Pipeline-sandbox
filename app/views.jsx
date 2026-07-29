@@ -434,16 +434,79 @@ function MetricsView({ deals, onOpen }){
 
 /* ============================ Broker Calls ============================ */
 // Every logged broker call across all deals — grouped by date, then by metro, exportable to Excel for GHL.
+const LS_STANDALONE_CALLS = 'altus_standalone_calls_v1';
+function loadStandaloneCalls(){
+  try { const s = JSON.parse(localStorage.getItem(LS_STANDALONE_CALLS)); if (Array.isArray(s)) return s; } catch(e) {}
+  return [];
+}
+
+const NEWCALL_INPUT = { border:'1px solid var(--line-2)', borderRadius:7, padding:'0 10px', height:34,
+  background:'var(--panel)', fontSize:12.5, color:'var(--ink)', fontFamily:'var(--font)', width:'100%', boxSizing:'border-box' };
+
+function NewCallField({ label, value, placeholder, onChange, flex }){
+  return (
+    <div style={{ flex:flex||1, minWidth:150 }}>
+      <div style={{ fontSize:10, fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase', color:'var(--muted)', marginBottom:4 }}>{label}</div>
+      <input value={value} placeholder={placeholder} onChange={(ev) => onChange(ev.target.value)} style={NEWCALL_INPUT}/>
+    </div>
+  );
+}
+
+function NewCallForm({ draft, setDraft, onSave, onCancel }){
+  const upd = (k) => (v) => setDraft((d) => ({ ...d, [k]:v }));
+  return (
+    <Card>
+      <div style={{ fontSize:11, fontWeight:700, letterSpacing:'.07em', textTransform:'uppercase', color:'var(--ink)', marginBottom:12 }}>
+        New Broker Call <span style={{ fontWeight:400, textTransform:'none', letterSpacing:0, color:'var(--muted)' }}>— not attached to a deal</span>
+      </div>
+      <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginBottom:10 }}>
+        <NewCallField label="Broker Name" value={draft.brokerName} onChange={upd('brokerName')} placeholder="Broker name…"/>
+        <NewCallField label="Brokerage / Firm" value={draft.brokerFirm} onChange={upd('brokerFirm')} placeholder="Brokerage / firm…"/>
+        <NewCallField label="Metro" value={draft.market} onChange={upd('market')} placeholder="e.g. Dallas, TX"/>
+        <NewCallField label="Property (optional)" value={draft.propertyName} onChange={upd('propertyName')} placeholder="Property or portfolio…"/>
+      </div>
+      <div style={{ display:'flex', gap:10, alignItems:'flex-end', flexWrap:'wrap' }}>
+        <NewCallField label="Note" value={draft.note} onChange={upd('note')} flex={3} placeholder="What did they say? Pricing guidance, timeline, feedback…"/>
+        <button onClick={onSave}
+          style={{ height:34, padding:'0 18px', border:'none', borderRadius:7, background:'var(--accent)', color:'#fff',
+            fontSize:12.5, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>Save call</button>
+        <button onClick={onCancel}
+          style={{ height:34, padding:'0 14px', border:'1px solid var(--line-2)', borderRadius:7, background:'var(--panel)',
+            color:'var(--slate)', fontSize:12.5, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>Cancel</button>
+      </div>
+    </Card>
+  );
+}
+
 function BrokerCallsView({ deals, onOpen }){
   const [days, setDays] = useStateV(99999);
+  const [standalone, setStandalone] = useStateV(loadStandaloneCalls);
+  const [adding, setAdding] = useStateV(false);
+  const [draft, setDraft] = useStateV({ brokerName:'', brokerFirm:'', market:'', propertyName:'', note:'' });
+
+  React.useEffect(() => {
+    try { localStorage.setItem(LS_STANDALONE_CALLS, JSON.stringify(standalone)); } catch(e) {}
+  }, [standalone]);
+
+  const saveDraft = () => {
+    if (!draft.brokerName.trim() && !draft.note.trim()) return;
+    setStandalone((s) => [{ id:'scall_'+Date.now().toString(36), ts:new Date().toISOString(),
+      brokerName:draft.brokerName.trim(), brokerFirm:draft.brokerFirm.trim(),
+      market:draft.market.trim(), propertyName:draft.propertyName.trim(), note:draft.note.trim() }, ...s]);
+    setDraft({ brokerName:'', brokerFirm:'', market:'', propertyName:'', note:'' });
+    setAdding(false);
+  };
+  const removeStandalone = (id) => setStandalone((s) => s.filter((e) => e.id !== id));
 
   const allCalls = useMemoV(() => {
     const flat = [];
     deals.forEach((d) => (Array.isArray(d.callLog) ? d.callLog : []).forEach((e) => {
       flat.push({ ...e, dealId: d.id, dealName: d.name, market: d.market || 'Unspecified' });
     }));
+    standalone.forEach((e) => flat.push({ ...e, dealId: null,
+      dealName: e.propertyName || 'No deal attached', market: e.market || 'Unspecified' }));
     return flat.sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
-  }, [deals]);
+  }, [deals, standalone]);
 
   const isAll = days === 99999;
   const cutoff = TODAY.getTime() - days*DAY;
@@ -488,6 +551,11 @@ function BrokerCallsView({ deals, onOpen }){
           <p style={{ margin:'4px 0 0', fontSize:13.5, color:'var(--muted)' }}>{inRange.length} logged call{inRange.length!==1?'s':''} across all deals</p>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+          <button onClick={() => setAdding((v) => !v)}
+            style={{ display:'inline-flex', alignItems:'center', gap:6, height:36, padding:'0 14px', border:'none',
+              borderRadius:8, background:'var(--navy)', color:'#fff', fontSize:12.5, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>
+            <Icon name="plus" size={13}/> Log a call
+          </button>
           <Seg value={days} onChange={setDays} options={RANGES}/>
           <button onClick={() => doExport(inRange, 'broker_calls_' + (isAll?'all':days+'d') + '.csv')} disabled={!inRange.length}
             style={{ display:'inline-flex', alignItems:'center', gap:6, height:36, padding:'0 14px', border:'1px solid var(--line-2)',
@@ -503,6 +571,10 @@ function BrokerCallsView({ deals, onOpen }){
           </button>}
         </div>
       </div>
+
+      {adding && <NewCallForm draft={draft} setDraft={setDraft} onSave={saveDraft} onCancel={() => setAdding(false)} />}
+
+      <div style={{ height: adding ? 16 : 0 }} />
 
       {grouped.length === 0 ? (
         <div style={{ padding:'60px 20px', textAlign:'center', color:'var(--muted)', background:'var(--panel)',
@@ -523,18 +595,24 @@ function BrokerCallsView({ deals, onOpen }){
               {metros.map(([metro, rows]) => (
                 <Card key={metro} title={metro} pad={false} right={<span style={{ fontSize:12, color:'var(--muted)' }}>{rows.length} call{rows.length!==1?'s':''}</span>}>
                   {rows.map((e,i) => (
-                    <div key={e.id} onClick={() => onOpen(e.dealId)} style={{ display:'grid', gridTemplateColumns:'80px 1fr 1fr', gap:12,
-                      padding:'11px 18px', cursor:'pointer', borderBottom: i<rows.length-1 ? '1px solid var(--line)' : 'none' }}
+                    <div key={e.id} onClick={() => { if (e.dealId) onOpen(e.dealId); }} style={{ display:'grid', gridTemplateColumns:'80px 1fr 1fr auto', gap:12,
+                      padding:'11px 18px', cursor:e.dealId?'pointer':'default', borderBottom: i<rows.length-1 ? '1px solid var(--line)' : 'none' }}
                       onMouseEnter={(ev) => ev.currentTarget.style.background='var(--panel-2)'}
                       onMouseLeave={(ev) => ev.currentTarget.style.background='transparent'}>
                       <div className="num" style={{ fontSize:11.5, color:'var(--muted)' }}>
                         {e.ts ? new Date(e.ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '—'}
                       </div>
-                      <div className="clip" style={{ fontSize:13, fontWeight:600, color:'var(--ink)' }}>{e.dealName}</div>
+                      <div className="clip" style={{ fontSize:13, fontWeight:600, color:e.dealId?'var(--ink)':'var(--muted)', fontStyle:e.dealId?'normal':'italic' }}>{e.dealName}</div>
                       <div>
                         <span style={{ fontSize:12.5, fontWeight:600, color:'var(--ink)' }}>{e.brokerName || 'Unknown broker'}</span>
                         {e.brokerFirm && <span style={{ fontSize:12, color:'var(--muted)' }}> — {e.brokerFirm}</span>}
                         {e.note && <div className="clip" style={{ fontSize:12, color:'var(--slate)', marginTop:1 }}>{e.note}</div>}
+                      </div>
+                      <div>
+                        {!e.dealId && <button onClick={(ev) => { ev.stopPropagation(); removeStandalone(e.id); }}
+                          title="Delete call"
+                          style={{ border:'1px solid var(--line-2)', borderRadius:6, background:'var(--panel)', color:'var(--faint)',
+                            height:24, padding:'0 8px', fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'var(--font)' }}>Delete</button>}
                       </div>
                     </div>
                   ))}

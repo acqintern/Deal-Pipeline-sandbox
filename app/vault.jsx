@@ -4,8 +4,8 @@
 // (PDF inline) with fullscreen + download. Drag-and-drop accepted any time.
 const { useState: useSV, useEffect: useEffectV, useRef: useRefV } = React;
 
-const DOC_CATS = ['OM', 'T-12', 'Rent Roll', 'Other'];
-const CAT_COLOR = { 'OM': '#2f6df0', 'T-12': '#6b46e0', 'Rent Roll': '#0c7a43', 'Other': '#5b7088' };
+const DOC_CATS = ['OM', 'T-12', 'Rent Roll', 'CoStar', 'Other'];
+const CAT_COLOR = { 'OM': '#2f6df0', 'T-12': '#6b46e0', 'Rent Roll': '#0c7a43', 'CoStar': '#b87214', 'Other': '#5b7088' };
 
 function fmtBytes(n) {
   if (n == null) return '';
@@ -24,6 +24,37 @@ const isPdf = (d) => (d.ext || '').toLowerCase() === 'pdf' || (d.type || '').inc
 const isImg = (d) => ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes((d.ext || '').toLowerCase());
 const isXls = (d) => ['xlsx','xls','xlsm','csv'].includes((d.ext || '').toLowerCase());
 
+/* ---- Local file store (IndexedDB) ----
+   Used when Supabase storage isn't connected, so documents can always be added.
+   Files stay in this browser; metadata still travels with the deal. */
+const LOCAL_DB = 'altus-docs', LOCAL_STORE = 'files';
+function localDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(LOCAL_DB, 1);
+    req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(LOCAL_STORE)) db.createObjectStore(LOCAL_STORE); };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error || new Error('IndexedDB unavailable'));
+  });
+}
+async function localPut() { throw new Error('Local document storage is disabled — files must upload to Supabase.'); }
+async function localGet(key) {
+  const db = await localDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(LOCAL_STORE, 'readonly');
+    const r = tx.objectStore(LOCAL_STORE).get(key);
+    r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
+  });
+}
+async function localDel(key) {
+  try {
+    const db = await localDB();
+    const tx = db.transaction(LOCAL_STORE, 'readwrite');
+    tx.objectStore(LOCAL_STORE).delete(key);
+  } catch (e) {}
+}
+const isLocalDoc = (d) => !!d && (d.local || /^local:/.test(d.path || ''));
+const localKey = (d) => (d.path || '').replace(/^local:/, '');
+
 /* ---- Viewer drawer (half-window pop-out) ---- */
 function DocViewer({ doc, onClose }) {
   const [url, setUrl] = useSV(null);
@@ -33,9 +64,17 @@ function DocViewer({ doc, onClose }) {
   const cloud = window.AltusCloud;
 
   useEffectV(() => {
-    let active = true;
+    let active = true, objUrl = null;
     setUrl(null); setErr(null);
     if (!doc) return;
+    if (isLocalDoc(doc)) {
+      localGet(localKey(doc)).then((blob) => {
+        if (!active) return;
+        if (!blob) { setErr('This file was added on another device or browser.'); return; }
+        objUrl = URL.createObjectURL(blob); setUrl(objUrl);
+      }).catch((e) => { if (active) setErr(String(e.message || e)); });
+      return () => { active = false; if (objUrl) URL.revokeObjectURL(objUrl); };
+    }
     if (!cloud || !cloud.signedDocUrl) { setErr('Cloud storage is not connected.'); return; }
     cloud.signedDocUrl(doc.path, 3600).then((u) => { if (active) setUrl(u); }).catch((e) => { if (active) setErr(String(e.message || e)); });
     return () => { active = false; };
@@ -143,6 +182,7 @@ function DocumentVault({ deal, set }) {
   const [dragOver, setDragOver] = useSV(false);
   const [uploads, setUploads] = useSV([]);      // [{name, status, error}]
   const [viewing, setViewing] = useSV(null);
+  const [pendingCat, setPendingCat] = useSV(null);   // category to force on the next picker result
   const fileRef = useRefV(null);
   const cloud = window.AltusCloud;
   const cloudOn = !!(cloud && cloud.enabled && cloud.uploadDoc);
@@ -150,7 +190,11 @@ function DocumentVault({ deal, set }) {
   const addDocs = async (fileList, category) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    if (!cloudOn) { setUploads([{ name: files[0].name, status: 'error', error: 'Connect Supabase storage to upload.' }]); return; }
+    if (!cloudOn) {
+      setUploads(files.map((f, i) => ({ key: 'err' + i + Date.now(), name: f.name, status: 'error',
+        error: 'Supabase storage isn’t connected — documents only upload to the cloud. Sign in on the live dashboard and add it there.' })));
+      return;
+    }
     for (const file of files) {
       const key = file.name + '_' + Date.now() + Math.random();
       setUploads((u) => [...u, { key, name: file.name, status: 'uploading' }]);
@@ -158,7 +202,6 @@ function DocumentVault({ deal, set }) {
         const meta = await cloud.uploadDoc(deal.id, file);
         const entry = { id: 'doc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           ...meta, category: category || guessCat(file.name) };
-        // append using the freshest deal.documents
         set('documents', [...(Array.isArray(deal.documents) ? deal.documents : []), entry]);
         setUploads((u) => u.map((x) => x.key === key ? { ...x, status: 'done' } : x));
         setTimeout(() => setUploads((u) => u.filter((x) => x.key !== key)), 1500);
@@ -169,6 +212,7 @@ function DocumentVault({ deal, set }) {
   };
   const guessCat = (name) => {
     const n = (name || '').toLowerCase();
+    if (/(costar|co-star|comp ?set|market analytics|submarket report|lease comps|sale comps)/.test(n)) return 'CoStar';
     if (/\b(om|offering|memorandum|marketing)\b/.test(n)) return 'OM';
     if (/(t-?12|t12|trailing|operating statement|income statement|p&l|profit)/.test(n)) return 'T-12';
     if (/(rent ?roll|rentroll|\brr\b)/.test(n)) return 'Rent Roll';
@@ -176,31 +220,44 @@ function DocumentVault({ deal, set }) {
   };
   const removeDoc = async (doc) => {
     if (!window.confirm('Remove "' + doc.name + '" from the vault? This deletes the stored file.')) return;
-    if (cloud && cloud.deleteDoc && doc.path) cloud.deleteDoc(doc.path);
+    if (isLocalDoc(doc)) localDel(localKey(doc));
+    else if (cloud && cloud.deleteDoc && doc.path) cloud.deleteDoc(doc.path);
     set('documents', docs.filter((d) => d.id !== doc.id));
   };
   const setCat = (doc, category) => set('documents', docs.map((d) => d.id === doc.id ? { ...d, category } : d));
 
   return (
-    <PanelCard title="Document Vault" hint={cloudOn ? 'OMs, T-12s, rent rolls & more — stored on Supabase' : 'Connect Supabase storage to enable'}>
+    <PanelCard title="Document Vault" hint={cloudOn ? 'OMs, T-12s, CoStar files & more — stored on Supabase' : 'Supabase storage not connected here — upload from the live dashboard'}>
       {/* drop zone */}
       <input ref={fileRef} type="file" multiple style={{ display: 'none' }} accept=".pdf,.xlsx,.xls,.xlsm,.csv,.png,.jpg,.jpeg,.doc,.docx"
-        onChange={(e) => { addDocs(e.target.files); e.target.value = ''; }} />
-      <div onClick={() => cloudOn && fileRef.current && fileRef.current.click()}
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (cloudOn) setDragOver(true); }}
+        onChange={(e) => { addDocs(e.target.files, pendingCat); setPendingCat(null); e.target.value = ''; }} />
+      <div onClick={() => fileRef.current && fileRef.current.click()}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }}
         onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); }}
-        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); addDocs(e.dataTransfer.files); }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); addDocs(e.dataTransfer.files, pendingCat); setPendingCat(null); }}
         style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', marginTop: 4,
           border: '1.5px dashed ' + (dragOver ? 'var(--accent)' : 'var(--line-2)'), borderRadius: 10,
-          background: dragOver ? 'var(--accent-soft)' : 'var(--panel-2)', cursor: cloudOn ? 'pointer' : 'not-allowed',
-          opacity: cloudOn ? 1 : 0.6, transition: 'border-color .12s, background .12s' }}>
+          background: dragOver ? 'var(--accent-soft)' : 'var(--panel-2)', cursor: 'pointer',
+          transition: 'border-color .12s, background .12s' }}>
         <span style={{ width: 36, height: 36, borderRadius: 9, flex: 'none', background: 'var(--accent)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="upload" size={17} />
         </span>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{dragOver ? 'Drop to add to the vault' : 'Drag & drop documents, or click to browse'}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>PDF, Excel, CSV, images · multiple files supported</div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 1 }}>PDF, Excel, CSV, images · multiple files supported · stored on Supabase</div>
         </div>
+      </div>
+
+      {/* CoStar quick-add — files downloaded from CoStar, filed under the CoStar category */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        <button onClick={() => { setPendingCat('CoStar'); if (fileRef.current) fileRef.current.click(); }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 13px',
+            border: '1px solid ' + CAT_COLOR.CoStar + '55', borderRadius: 8, background: CAT_COLOR.CoStar + '12',
+            color: CAT_COLOR.CoStar, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+            fontFamily: 'var(--font)' }}>
+          <Icon name="upload" size={13} /> Add CoStar file
+        </button>
+        <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>PDF or Excel exports — market analytics, comp sets, sale &amp; lease comps</span>
       </div>
 
       {/* in-flight uploads */}
@@ -235,7 +292,7 @@ function DocumentVault({ deal, set }) {
               </span>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--faint)' }}>{fmtBytes(d.size)} · {fmtDate(d.uploadedAt ? d.uploadedAt.slice(0, 10) : '')}</div>
+                <div style={{ fontSize: 11, color: 'var(--faint)' }}>{fmtBytes(d.size)} · {fmtDate(d.uploadedAt ? d.uploadedAt.slice(0, 10) : '')}{isLocalDoc(d) ? ' · not in Supabase — re-add to sync' : ''}</div>
               </div>
               <select value={d.category || 'Other'} onClick={(e) => e.stopPropagation()} onChange={(e) => setCat(d, e.target.value)}
             style={{ flex: 'none', fontSize: 11, fontWeight: 600, color: CAT_COLOR[d.category] || '#5b7088', background: (CAT_COLOR[d.category] || '#5b7088') + '14',
