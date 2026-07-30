@@ -1793,6 +1793,20 @@ function LOIStatusView({ deals, onOpen, onPatch }) {
 }
 
 /* ========================= Root ========================= */
+// Records a snapshot into a per-id rolling history (capped, small) so a realtime echo of
+// one of our own recent saves can still be recognized even after a later save has already
+// fired — a single "last snapshot" isn't enough once realtime is actually delivering
+// events, since a fast edit burst can fire several debounced saves before the first one's
+// echo returns.
+function recordSentSnapshot(historyRef, id, json) {
+  let set = historyRef.current[id];
+  if (!set) { set = new Set(); historyRef.current[id] = set; }
+  if (!set.has(json)) {
+    set.add(json);
+    if (set.size > 6) set.delete(set.values().next().value);
+  }
+}
+
 // Normalize any legacy stage names onto the current set whenever deals enter state.
 const migrateDeals = (arr) => Array.isArray(arr)
   ? arr.map((d) => {
@@ -2511,10 +2525,19 @@ function AltusApp() {
   const savedScrollRef = useR(0);      // saved scroll position before opening a deal
   const contactsLoaded = useR(false);
   const contactsSaveTimer = useR(null);
+  const justSavedContactsRef = useR({}); // same self-echo guard as justSavedDealsRef, for contacts
   const todosLoaded = useR(false);
   const todosSaveTimer = useR(null);
+  const justSavedTodosRef = useR({});    // same self-echo guard as justSavedDealsRef, for todos
   const dealsRef = useR(deals);          // always-fresh deals for the unload flush
-  const justSavedDealsRef = useR({});    // id -> JSON snapshot of what we last pushed, to ignore self-echoes
+  // id -> Set of recent JSON snapshots we've pushed, to ignore self-echoes. Keeps a short
+  // rolling history rather than just the latest save — with realtime now actually delivering
+  // events, a fast typing burst fires a new debounced save every ~400ms, and a Postgres
+  // Changes echo for an earlier save can arrive after a later save has already moved on.
+  // A single last-snapshot comparison would then miss the match and let the earlier
+  // (stale) echo overwrite whatever was typed since, which is exactly what caused notes
+  // fields to flicker and drop characters once realtime was turned on.
+  const justSavedDealsRef = useR({});
   const [pipeSortKey, setPipeSortKey] = useS('manual');
   const [pipeSortDir, setPipeSortDir] = useS('asc');
   const [saveState, setSaveState] = useS('idle'); // idle | dirty | saving | saved | error
@@ -2656,7 +2679,10 @@ function AltusApp() {
     try {localStorage.setItem(LS_TODOS, JSON.stringify(todos));} catch (e) {}
     if (cloud.enabled && (!cloud.requireLogin || session) && todosLoaded.current) {
       clearTimeout(todosSaveTimer.current);
-      todosSaveTimer.current = setTimeout(() => { cloud.saveTodos(todos).catch((e) => console.warn('[cloud] todos save failed', e)); }, 1000);
+      todosSaveTimer.current = setTimeout(() => {
+        todos.forEach((t) => recordSentSnapshot(justSavedTodosRef, t.id, JSON.stringify(t)));
+        cloud.saveTodos(todos).catch((e) => console.warn('[cloud] todos save failed', e));
+      }, 1000);
     }
   }, [todos]);
 
@@ -2664,7 +2690,10 @@ function AltusApp() {
     try {localStorage.setItem(LS_CONTACTS, JSON.stringify(contacts));} catch (e) {}
     if (cloud.enabled && (!cloud.requireLogin || session) && contactsLoaded.current) {
       clearTimeout(contactsSaveTimer.current);
-      contactsSaveTimer.current = setTimeout(() => { cloud.saveContacts(contacts).catch((e) => console.warn('[cloud] contacts save failed', e)); }, 1200);
+      contactsSaveTimer.current = setTimeout(() => {
+        contacts.forEach((c) => recordSentSnapshot(justSavedContactsRef, c.id, JSON.stringify(c)));
+        cloud.saveContacts(contacts).catch((e) => console.warn('[cloud] contacts save failed', e));
+      }, 1200);
     }
   }, [contacts]);
 
@@ -2690,9 +2719,7 @@ function AltusApp() {
       saveTimer.current = setTimeout(() => {
         firstPendingSaveAt.current = null;
         setSaveState('saving');
-        const snap = {};
-        dealsRef.current.forEach((d) => { snap[d.id] = JSON.stringify(d); });
-        justSavedDealsRef.current = snap;
+        dealsRef.current.forEach((d) => recordSentSnapshot(justSavedDealsRef, d.id, JSON.stringify(d)));
         cloud.saveDeals(dealsRef.current)
           .then(() => setSaveState('saved'))
           .catch((e) => { console.warn('[cloud] save failed', e); setSaveState('error'); });
@@ -2768,10 +2795,12 @@ function AltusApp() {
         return;
       }
       const incoming = migrateDeals([{ ...(payload.new.data || {}), id: payload.new.id }])[0];
-      // Skip echoes of our own recent save — the debounced upload can round-trip back
-      // via realtime after the user has already typed further, and applying it would
-      // stomp those newer keystrokes with the older snapshot we ourselves just sent.
-      if (justSavedDealsRef.current[incoming.id] === JSON.stringify(incoming)) return;
+      // Skip echoes of our own recent saves — the debounced upload can round-trip back via
+      // realtime after the user has already typed further (and, during a fast typing burst,
+      // after one or more later saves have already fired too), and applying a match against
+      // only the latest save would let an earlier save's late echo stomp newer keystrokes.
+      const sentSet = justSavedDealsRef.current[incoming.id];
+      if (sentSet && sentSet.has(JSON.stringify(incoming))) return;
       // Log the remote change for the "what changed" bar before applying it.
       (() => {
         const ts = new Date().toISOString();
@@ -2815,6 +2844,8 @@ function AltusApp() {
         return;
       }
       const incoming = { ...(payload.new.data || {}), id: payload.new.id };
+      const sentSet = justSavedContactsRef.current[incoming.id];
+      if (sentSet && sentSet.has(JSON.stringify(incoming))) return;
       setContacts((cs) => {
         const existing = cs.find((c) => c.id === incoming.id);
         if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return cs;
@@ -2833,6 +2864,8 @@ function AltusApp() {
         return;
       }
       const incoming = { ...(payload.new.data || {}), id: payload.new.id };
+      const sentSet = justSavedTodosRef.current[incoming.id];
+      if (sentSet && sentSet.has(JSON.stringify(incoming))) return;
       setTodos((ts) => {
         const existing = ts.find((t) => t.id === incoming.id);
         if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ts;
