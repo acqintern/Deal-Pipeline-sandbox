@@ -1793,6 +1793,20 @@ function LOIStatusView({ deals, onOpen, onPatch }) {
 }
 
 /* ========================= Root ========================= */
+// Canonical (key-order-independent) JSON serialization. Postgres jsonb does NOT preserve
+// object key order on storage — it canonicalizes keys by length then alphabetically — so a
+// plain JSON.stringify comparison between a local JS object and the same row read back from
+// Supabase (or echoed via realtime) essentially never matches even when the content is
+// identical, since the two sides serialize keys in different orders. Every comparison
+// between local state and cloud-sourced data must go through this instead of
+// JSON.stringify, or the comparison is permanently false.
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(v).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}
+
 // Records a snapshot into a per-id rolling history (capped, small) so a realtime echo of
 // one of our own recent saves can still be recognized even after a later save has already
 // fired — a single "last snapshot" isn't enough once realtime is actually delivering
@@ -2382,7 +2396,7 @@ function describeDealChange(prev, next) {
   const ms = (d) => d && d.marketReview && d.marketReview.status;
   if (ms(prev) !== ms(next) && ms(next) === 'done') out.push('Market review generated');
   if (!(prev.memo && prev.memo.data) && (next.memo && next.memo.data)) out.push('IC memo drafted');
-  if (!out.length && JSON.stringify(prev) !== JSON.stringify(next)) out.push('Underwriting updated');
+  if (!out.length && stableStringify(prev) !== stableStringify(next)) out.push('Underwriting updated');
   return out;
 }
 
@@ -2680,7 +2694,7 @@ function AltusApp() {
     if (cloud.enabled && (!cloud.requireLogin || session) && todosLoaded.current) {
       clearTimeout(todosSaveTimer.current);
       todosSaveTimer.current = setTimeout(() => {
-        todos.forEach((t) => recordSentSnapshot(justSavedTodosRef, t.id, JSON.stringify(t)));
+        todos.forEach((t) => recordSentSnapshot(justSavedTodosRef, t.id, stableStringify(t)));
         cloud.saveTodos(todos).catch((e) => console.warn('[cloud] todos save failed', e));
       }, 1000);
     }
@@ -2691,7 +2705,7 @@ function AltusApp() {
     if (cloud.enabled && (!cloud.requireLogin || session) && contactsLoaded.current) {
       clearTimeout(contactsSaveTimer.current);
       contactsSaveTimer.current = setTimeout(() => {
-        contacts.forEach((c) => recordSentSnapshot(justSavedContactsRef, c.id, JSON.stringify(c)));
+        contacts.forEach((c) => recordSentSnapshot(justSavedContactsRef, c.id, stableStringify(c)));
         cloud.saveContacts(contacts).catch((e) => console.warn('[cloud] contacts save failed', e));
       }, 1200);
     }
@@ -2719,7 +2733,7 @@ function AltusApp() {
       saveTimer.current = setTimeout(() => {
         firstPendingSaveAt.current = null;
         setSaveState('saving');
-        dealsRef.current.forEach((d) => recordSentSnapshot(justSavedDealsRef, d.id, JSON.stringify(d)));
+        dealsRef.current.forEach((d) => recordSentSnapshot(justSavedDealsRef, d.id, stableStringify(d)));
         cloud.saveDeals(dealsRef.current)
           .then(() => setSaveState('saved'))
           .catch((e) => { console.warn('[cloud] save failed', e); setSaveState('error'); });
@@ -2800,7 +2814,7 @@ function AltusApp() {
       // after one or more later saves have already fired too), and applying a match against
       // only the latest save would let an earlier save's late echo stomp newer keystrokes.
       const sentSet = justSavedDealsRef.current[incoming.id];
-      if (sentSet && sentSet.has(JSON.stringify(incoming))) return;
+      if (sentSet && sentSet.has(stableStringify(incoming))) return;
       // Log the remote change for the "what changed" bar before applying it.
       (() => {
         const ts = new Date().toISOString();
@@ -2810,14 +2824,14 @@ function AltusApp() {
             dealName: incoming.name || 'Untitled deal', kind: 'added', text: 'Added to the pipeline' }]);
           return;
         }
-        if (JSON.stringify(prev) === JSON.stringify(incoming)) return;
+        if (stableStringify(prev) === stableStringify(incoming)) return;
         pushActivity(describeDealChange(prev, incoming).map((text, i) => ({
           id: 'a_' + incoming.id + '_' + i + '_' + Date.now(), ts, dealId: incoming.id,
           dealName: incoming.name || prev.name || 'Untitled deal', kind: 'changed', text })));
       })();
       setDeals((ds) => {
         const existing = ds.find((d) => d.id === incoming.id);
-        if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ds;
+        if (existing && stableStringify(existing) === stableStringify(incoming)) return ds;
         // Guard against applying a stale/partial row over real local data — if the incoming
         // row is drastically smaller (e.g. a delayed echo of a pre-edit snapshot, or a
         // truncated write) it's more likely data loss than a legitimate remote edit.
@@ -2845,10 +2859,10 @@ function AltusApp() {
       }
       const incoming = { ...(payload.new.data || {}), id: payload.new.id };
       const sentSet = justSavedContactsRef.current[incoming.id];
-      if (sentSet && sentSet.has(JSON.stringify(incoming))) return;
+      if (sentSet && sentSet.has(stableStringify(incoming))) return;
       setContacts((cs) => {
         const existing = cs.find((c) => c.id === incoming.id);
-        if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return cs;
+        if (existing && stableStringify(existing) === stableStringify(incoming)) return cs;
         return existing ? cs.map((c) => c.id === incoming.id ? incoming : c) : [...cs, incoming];
       });
     });
@@ -2865,10 +2879,10 @@ function AltusApp() {
       }
       const incoming = { ...(payload.new.data || {}), id: payload.new.id };
       const sentSet = justSavedTodosRef.current[incoming.id];
-      if (sentSet && sentSet.has(JSON.stringify(incoming))) return;
+      if (sentSet && sentSet.has(stableStringify(incoming))) return;
       setTodos((ts) => {
         const existing = ts.find((t) => t.id === incoming.id);
-        if (existing && JSON.stringify(existing) === JSON.stringify(incoming)) return ts;
+        if (existing && stableStringify(existing) === stableStringify(incoming)) return ts;
         return existing ? ts.map((t) => t.id === incoming.id ? incoming : t) : [...ts, incoming];
       });
     });
