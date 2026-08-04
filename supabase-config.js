@@ -8,8 +8,8 @@
 //    Supabase dashboard → Project Settings → API. Until both are filled, the app
 //    keeps using local browser storage.
 window.ALTUS_CONFIG = {
-  SUPABASE_URL: 'https://twnvabiabnxfpjgrxgkg.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_FRgHESmXMP9xbt6c1JUHIg_TO2nDUSN',
+SUPABASE_URL: 'https://sydollurtdqffgvumuwz.supabase.co',
+SUPABASE_ANON_KEY: 'sb_publishable_oLIak5cHsVJ9bKbmgaMZPg_hdLHteFg',
 };
 
 // 2) AI DOCUMENT PARSING. The OM / T-12 / Rent Roll upload buttons call this.
