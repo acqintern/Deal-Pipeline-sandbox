@@ -3124,6 +3124,105 @@ Do not include any text outside the JSON object.`;
     return parsed;
   };
 
+  // ── Analyst Screener ── Altus's going-in cap rate, yield-on-cost spread, and the
+  // 6.5% hurdle are all deterministic arithmetic already available from computeMetrics/
+  // computeUW — computed here in JS so the verdict is auditable, not left for the model
+  // to (mis)calculate. Claude's only job is the qualitative read: reconstruct the broker's
+  // story and classify the deal so the right gate applies.
+  const runAnalystScreener = async (dealId) => {
+    const d = (dealsRef.current || deals).find((x) => x.id === dealId);
+    if (!d) return null;
+    const m = window.computeMetrics ? window.computeMetrics(d) : { goingInCap: 0, totalBasis: 0 };
+    const uw = window.hasUWInputs && window.hasUWInputs(d) && window.computeUW ? window.computeUW(d) : null;
+
+    const goingInCapPct = m.goingInCap * 100;
+    const totalBasis = m.totalBasis;
+    const hurdlePass = goingInCapPct >= 6.5;
+
+    // Year-3 stabilized NOI ÷ total cost basis, minus the going-in cap rate (100-150bps target band)
+    const y3 = uw && uw.rows && uw.rows[3];
+    const yieldOnCostSpreadBps = (y3 && totalBasis > 0)
+      ? Math.round(((y3.noi / totalBasis) - m.goingInCap) * 10000)
+      : null;
+    const spreadPass = yieldOnCostSpreadBps != null && yieldOnCostSpreadBps >= 100;
+
+    const econVacPct = uw ? uw.inPlaceEconVac * 100 : null;
+    const highVacancy = econVacPct != null && econVacPct > 20;
+    const avgCoC = uw ? uw.avgYield : null;
+    const dealIRR = uw ? uw.irr : null;
+
+    const ctx = [
+      'Property: ' + (d.name || '') + (d.market ? ' — ' + d.market : ''),
+      d.units ? 'Units: ' + d.units : '', d.vintage ? 'Year built: ' + d.vintage : '',
+      d.purchasePrice ? 'UW price: $' + Math.round(d.purchasePrice).toLocaleString() : '',
+      d.askPrice ? 'Ask: $' + Math.round(d.askPrice).toLocaleString() : '',
+      d.capex ? 'Capex / renovation budget: $' + Math.round(d.capex).toLocaleString() : '',
+      'Altus going-in cap rate (trailing EGI minus market-benchmarked opex, over UW price): ' + goingInCapPct.toFixed(2) + '%',
+      'Total cost basis (price + capex): $' + Math.round(totalBasis).toLocaleString(),
+      y3 ? 'Year-3 stabilized NOI: $' + Math.round(y3.noi).toLocaleString() : '',
+      yieldOnCostSpreadBps != null ? 'Yield-on-cost spread vs. going-in cap: ' + yieldOnCostSpreadBps + ' bps' : '',
+      econVacPct != null ? 'In-place economic vacancy: ' + econVacPct.toFixed(1) + '%' : '',
+      avgCoC != null ? 'Average cash-on-cash across the hold: ' + (avgCoC * 100).toFixed(1) + '%' : '',
+      dealIRR != null ? 'Full-hold levered IRR: ' + (dealIRR * 100).toFixed(1) + '%' : '',
+      d.notes ? 'Existing analyst notes: ' + String(d.notes).slice(0, 600) : '',
+    ].filter(Boolean).join('\n');
+
+    const prompt = `You are an acquisitions analyst at Altus Equity screening a multifamily deal against the firm's investment criteria. Be direct and specific — this feeds a pipeline record other analysts and partners will read.
+
+DEAL DATA:
+${ctx}
+
+Return ONLY valid JSON (no markdown) with this shape:
+{
+  "brokerStory": "2-3 sentences: what is the broker claiming, and why (their pitch on value, upside, why now)",
+  "classification": "one of: physical-value-add, stabilized-operational, blended — physical-value-add means the NOI growth story depends on a capex/renovation program lifting rents on upgraded units; stabilized-operational means the broker is winning mostly on ancillary income and expense-line assumptions with little or no capex; blended is both",
+  "classificationReasoning": "1-2 sentences justifying the classification against the actual capex figure and NOI growth story above"
+}
+Do not include any text outside the JSON object.`;
+
+    const out = await aiComplete(prompt);
+    const parsed = safeParseJSON(out);
+    if (!parsed || !parsed.classification) throw new Error('Could not parse the screener response.');
+
+    // ---- Verdict logic (deterministic) ----
+    let verdict, verdictReason;
+    if (!hurdlePass) {
+      verdict = "GB Don't Review";
+      verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% is below the 6.5% hurdle.`;
+    } else if (parsed.classification === 'stabilized-operational') {
+      verdict = 'GB Review';
+      verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle; little/no capex basis so the yield-on-cost spread isn't the deciding gate here.`;
+    } else if (spreadPass) {
+      verdict = 'GB Review';
+      verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle and the yield-on-cost spread (${yieldOnCostSpreadBps} bps) clears the 100 bps gate.`;
+    } else {
+      verdict = "GB Don't Review";
+      verdictReason = yieldOnCostSpreadBps == null
+        ? "Going-in cap rate clears the hurdle, but Year-3 stabilized NOI isn't available to test the yield-on-cost spread — enter a hold period ≥3 years and stabilized assumptions to complete the screen."
+        : `Going-in cap rate clears the hurdle, but the yield-on-cost spread (${yieldOnCostSpreadBps} bps) is below the 100 bps gate — the capital program isn't earning its keep even though the in-place basis is fine.`;
+    }
+    // High-vacancy override — only tightens an already-passing verdict
+    if (verdict === 'GB Review' && highVacancy) {
+      if (dealIRR != null && dealIRR * 100 > 20) {
+        verdictReason += ` In-place economic vacancy is elevated (${econVacPct.toFixed(1)}%), but the full-hold IRR of ${(dealIRR * 100).toFixed(1)}% clears the 20% bar this requires.`;
+      } else {
+        verdict = "GB Don't Review";
+        verdictReason = `In-place economic vacancy is elevated (${econVacPct.toFixed(1)}%), which requires IRR above 20% to proceed — ` +
+          (dealIRR != null ? `current IRR is only ${(dealIRR * 100).toFixed(1)}%.` : "IRR isn't available to confirm it clears that bar.");
+      }
+    }
+
+    const stamp = window.ALTUS_TODAY || new Date().toISOString().slice(0, 10);
+    const noteBlock = `\n\n— Analyst Screener (${stamp}) —\n` +
+      `Broker's story: ${parsed.brokerStory}\n` +
+      `Classification: ${parsed.classification} — ${parsed.classificationReasoning}\n` +
+      `Verdict: ${verdict} — ${verdictReason}`;
+
+    const result = { ...parsed, verdict, verdictReason, goingInCapPct, yieldOnCostSpreadBps, econVacPct };
+    patch(dealId, { status: verdict, notes: (d.notes ? d.notes : '') + noteBlock });
+    return result;
+  };
+
   // Store an uploaded document in the vault (Supabase Storage + deal.documents).
   // Used by the OM/T-12/Rent Roll parse handlers so parsed files are kept automatically.
   const stashDoc = async (dealId, file, category) => {
@@ -3425,7 +3524,7 @@ ${text}`;
         t12Data={t12Map[deal.id]} rrData={rrMap[deal.id]}
         onT12Upload={handleT12Upload} onRRUpload={handleRentRollUpload}
         onClearOM={clearOM} onClearT12={clearT12} onClearRR={clearRR}
-        onRunMarketReview={runMarketReview} onRunMemo={runMemoNarrative} onImportCoStar={importCoStar}
+        onRunMarketReview={runMarketReview} onRunMemo={runMemoNarrative} onRunScreener={runAnalystScreener} onImportCoStar={importCoStar}
         todos={todos} onAddTodo={addTodo} onPatchTodo={patchTodo} onDeleteTodo={deleteTodo}
         onViewTasks={() => { setOpenId(null); setView('tasks'); }} /> :
         view === 'pipeline' ? <PipelineView deals={pipelineDeals} allDeals={deals} onOpen={open} onPatch={patch}

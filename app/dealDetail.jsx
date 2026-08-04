@@ -893,7 +893,7 @@ function EditableTitle({ value, onCommit }) {
 }
 function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMUpload,
   t12Data, rrData, onT12Upload, onRRUpload, onClearOM, onClearT12, onClearRR,
-  onRunMarketReview, onRunMemo, onImportCoStar,
+  onRunMarketReview, onRunMemo, onRunScreener, onImportCoStar,
   todos, onAddTodo, onPatchTodo, onDeleteTodo, onViewTasks }) {
   const [tab, setTab] = useStateD('summary');
   const [propView, setPropView] = useStateD('combined');
@@ -910,6 +910,15 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   }, []);
   const set = (k, v) => onPatch(deal.id, typeof k === 'object' ? k : { [k]: v });
   const patch = (obj) => onPatch(deal.id, obj);
+  const [screenerBusy, setScreenerBusy] = useStateD(false);
+  const [screenerErr, setScreenerErr] = useStateD(null);
+  const runScreener = async () => {
+    if (!onRunScreener || screenerBusy) return;
+    setScreenerBusy(true); setScreenerErr(null);
+    try { await onRunScreener(deal.id); }
+    catch (e) { setScreenerErr(String(e && e.message ? e.message : e)); }
+    finally { setScreenerBusy(false); }
+  };
   const makeProperty = (i) => ({ id: 'p' + Date.now() + '_' + i, name: 'Property ' + (i + 1),
     market: deal.market || '', units: '', vintage: '', askPrice: '', purchasePrice: '', notes: '' });
   // Roll per-property Ask/UW price + units up to deal-level fields, atomically alongside the
@@ -1028,12 +1037,16 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
                 {STAGE_ALL.map((s) => <option key={s} value={s}>{STAGE_META[s].label}</option>)}
               </select>
               <span style={{ width: 1, height: 18, background: 'var(--line)', flex: 'none' }} />
-              {/* Analyst Screener (placeholder — not wired up yet) */}
-              <button type="button" onClick={() => {}} title="Analyst Screener — coming soon"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--line-2)',
-                  background: 'var(--panel)', color: 'var(--slate)', borderRadius: 7, padding: '6px 10px',
-                  fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font)' }}>
-                <Icon name="search" size={13} /> Analyst Screener
+              {/* Analyst Screener — runs the OM/T-12 numbers through Altus's going-in cap,
+                  yield-on-cost spread, and vacancy gates, then writes the verdict to Status + Notes */}
+              <button type="button" onClick={runScreener} disabled={screenerBusy}
+                title={screenerErr || "Reconstruct the broker's story, classify the deal, and screen it against Altus's investment criteria"}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
+                  border: '1px solid ' + (screenerErr ? 'var(--neg)' : 'var(--line-2)'),
+                  background: 'var(--panel)', color: screenerErr ? 'var(--neg)' : 'var(--slate)', borderRadius: 7, padding: '6px 10px',
+                  fontSize: 12.5, fontWeight: 600, cursor: screenerBusy ? 'default' : 'pointer',
+                  fontFamily: 'var(--font)', opacity: screenerBusy ? .6 : 1 }}>
+                <Icon name="search" size={13} /> {screenerBusy ? 'Screening…' : 'Analyst Screener'}
               </button>
             </div>
           </div>
