@@ -733,9 +733,12 @@ function FullUnderwritingTab({ deal, set, propView, setPropView, setProperties, 
 }
 
 /* ───────────── T-12 parsed banner ───────────── */
-function T12ParsedSection({ parsed, onAccept }) {
+function T12ParsedSection({ parsed, onAccept, onReupload }) {
   const [dismissed, setDismissed] = useSU(false);
   if (dismissed) return null;
+  // See OMParsedSection's clearAndDismiss for why this also clears the stored parse —
+  // local `dismissed` state doesn't survive reopening the deal, but omData does.
+  const clearAndDismiss = () => { setDismissed(true); onReupload && onReupload(); };
   const F = [
     { key: 'badDebt', label: 'Bad Debt / Delinquency', patch: (v) => ({ badDebt: Number(v) || 0 }) },
     { key: 'concessions', label: 'Concessions', patch: (v) => ({ concessions: Number(v) || 0 }) },
@@ -746,10 +749,10 @@ function T12ParsedSection({ parsed, onAccept }) {
   const money = (v) => (v != null && v !== '') ? '$' + Number(v).toLocaleString() : null;
   const found = F.filter((f) => parsed[f.key] != null && parsed[f.key] !== '');
   const missing = F.filter((f) => parsed[f.key] == null || parsed[f.key] === '');
-  const applyAll = () => { let p = {}; found.forEach((f) => { p = { ...p, ...f.patch(parsed[f.key]) }; }); onAccept(p); };
+  const applyAll = () => { let p = {}; found.forEach((f) => { p = { ...p, ...f.patch(parsed[f.key]) }; }); onAccept(p); clearAndDismiss(); };
   return (
     <BannerShell title="T-12 parsed" sub={'Pulled ' + found.length + ' figure' + (found.length === 1 ? '' : 's') + ' from the trailing-12 statement'}
-      canApply={found.length > 0} onApplyAll={applyAll} onDismiss={() => setDismissed(true)}>
+      canApply={found.length > 0} onApplyAll={applyAll} onDismiss={clearAndDismiss} onReupload={onReupload}>
       {found.map((f) => <FoundRow key={f.key} label={f.label} display={money(parsed[f.key])} onUse={() => onAccept(f.patch(parsed[f.key]))} />)}
       {missing.map((f) => <MissingRow key={f.key} label={f.label} />)}
     </BannerShell>
@@ -757,9 +760,12 @@ function T12ParsedSection({ parsed, onAccept }) {
 }
 
 /* ───────────── Rent Roll parsed banner ───────────── */
-function RentRollParsedSection({ parsed, onAccept }) {
+function RentRollParsedSection({ parsed, onAccept, onReupload }) {
   const [dismissed, setDismissed] = useSU(false);
   if (dismissed) return null;
+  // See OMParsedSection's clearAndDismiss for why this also clears the stored parse —
+  // local `dismissed` state doesn't survive reopening the deal, but omData does.
+  const clearAndDismiss = () => { setDismissed(true); onReupload && onReupload(); };
   const money = (v) => (v != null && v !== '') ? '$' + Number(v).toLocaleString() : null;
   const F = [
     { key: 'gprAnnual', label: 'Gross Potential Rent (annual)', disp: money, patch: (v) => ({ gprAnnual: Number(v) || 0 }) },
@@ -768,12 +774,12 @@ function RentRollParsedSection({ parsed, onAccept }) {
     { key: 'units', label: 'Units', disp: (v) => fmtNum(v), patch: (v) => ({ units: Number(v) || 0 }) },
   ];
   const found = F.filter((f) => parsed[f.key] != null && parsed[f.key] !== '');
-  const applyAll = () => { let p = {}; found.forEach((f) => { p = { ...p, ...f.patch(parsed[f.key]) }; }); onAccept(p); };
+  const applyAll = () => { let p = {}; found.forEach((f) => { p = { ...p, ...f.patch(parsed[f.key]) }; }); onAccept(p); clearAndDismiss(); };
   const vacPct = parsed.totalUnits ? (parsed.vacantUnits / parsed.totalUnits) : null;
   return (
     <BannerShell title="Rent Roll parsed"
       sub={(parsed.totalUnits ? parsed.totalUnits + ' units · ' : '') + (vacPct != null ? (vacPct * 100).toFixed(1) + '% physical vacancy' : '')}
-      canApply={found.length > 0} onApplyAll={applyAll} onDismiss={() => setDismissed(true)}>
+      canApply={found.length > 0} onApplyAll={applyAll} onDismiss={clearAndDismiss} onReupload={onReupload}>
       {found.map((f) => <FoundRow key={f.key} label={f.label} display={f.disp(parsed[f.key])} onUse={() => onAccept(f.patch(parsed[f.key]))} />)}
     </BannerShell>
   );

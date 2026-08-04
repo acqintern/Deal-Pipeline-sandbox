@@ -205,9 +205,13 @@ function ParseErrorBanner({ label, error }) {
 }
 
 /* ── OM Parsed Results Banner ── */
-function OMParsedSection({ parsed, deal, properties, targetIdx, setTargetIdx, onAccept }) {
+function OMParsedSection({ parsed, deal, properties, targetIdx, setTargetIdx, onAccept, onReupload }) {
   const [dismissed, setDismissed] = useStateD(false);
   if (dismissed) return null;
+  // Clearing the stored parse (not just hiding locally) is what stops this banner from
+  // reappearing every time the deal is reopened — local `dismissed` state alone doesn't
+  // survive a remount, but the underlying omData does, so it kept coming back.
+  const clearAndDismiss = () => { setDismissed(true); onReupload && onReupload(); };
   const isPortfolio = deal.isPortfolio && Array.isArray(properties) && properties.length > 1;
 
   const _rawC = Array.isArray(parsed.brokerContacts) ? parsed.brokerContacts :
@@ -245,13 +249,13 @@ function OMParsedSection({ parsed, deal, properties, targetIdx, setTargetIdx, on
     found.forEach((f) => Object.assign(patch, f.patch(parsed[f.key])));
     if (firstContact) patch.broker = brokerStr(firstContact.name);
     onAccept(patch);
-    setDismissed(true);
+    clearAndDismiss();
   };
 
   return (
     <BannerShell title="OM Parsed"
     sub={`${foundCount} of ${totalFields} fields extracted${foundCount < totalFields ? ` · ${totalFields - foundCount} need manual entry` : ''}`}
-    canApply={foundCount > 0} onApplyAll={acceptAll} onDismiss={() => setDismissed(true)}>
+    canApply={foundCount > 0} onApplyAll={acceptAll} onDismiss={clearAndDismiss} onReupload={onReupload}>
       {isPortfolio &&
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Apply to:</span>
