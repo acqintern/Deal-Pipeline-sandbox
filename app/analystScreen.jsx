@@ -150,6 +150,26 @@ function OpexBenchRow({ line, deal, set, units }) {
   );
 }
 
+function OpexTotalRow({ deal, units }) {
+  const total = OPEX_LINES.reduce((s, line) => s + numA(deal[line.key], 0), 0) + numA(deal.opexManagement, 0);
+  const perUnit = total > 0 && units > 0 ? total / units : null;
+  const flag = perUnit == null ? null : perUnit > 8000 ? 'high' : perUnit < 6000 ? 'low' : 'ok';
+  const flagTitle = flag === 'high' ? 'Above the $6,000–$8,000/unit total benchmark band'
+    : flag === 'low' ? 'Below the $6,000–$8,000/unit total benchmark band' : null;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: OPEX_ROW_COLS,
+      padding: '9px 20px', alignItems: 'center', gap: 8, background: 'var(--panel-2)', borderTop: '2px solid var(--line)' }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>Total Operating Expenses</span>
+      <span className="num" style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{total > 0 ? moneyA(total) : '—'}</span>
+      <span className="num" style={{ fontSize: 13, textAlign: 'center', fontWeight: 700, color: perUnit == null ? 'var(--faint)' : 'var(--accent)' }}>
+        {perUnit != null ? moneyA(perUnit) + '/u' : '—'}
+      </span>
+      <span style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>$6,000–$8,000/u</span>
+      <FlagPill flag={flag} title={flagTitle} />
+    </div>
+  );
+}
+
 function ManagementFeeRow({ deal, set, egi }) {
   const raw = deal.opexManagement;
   const pct = raw != null && raw !== '' && egi > 0 ? Number(raw) / egi * 100 : null;
@@ -334,6 +354,9 @@ function AnalystScreenTab({ deal, set }) {
             {otherInc > 0 &&
               <BuildRow label="Other Income" indent
                 altus={moneyA(otherInc)} broker="—" delta="—" faint />}
+            {deal.stabOtherIncome != null && deal.stabOtherIncome !== '' &&
+              <BuildRow label="Stabilized Other Income (Our Assumption)" indent
+                altus={moneyA(numA(deal.stabOtherIncome))} broker="—" delta="—" faint />}
             <BuildRow label="Effective Gross Income"
               altus={egi > 0 ? moneyA(egi) : '—'}
               broker={brokerEGI > 0 ? moneyA(brokerEGI) : '—'}
@@ -473,6 +496,7 @@ function AnalystScreenTab({ deal, set }) {
             </div>
             {OPEX_LINES.map((line) => <OpexBenchRow key={line.key} line={line} deal={deal} set={set} units={units} />)}
             <ManagementFeeRow deal={deal} set={set} egi={egi} />
+            <OpexTotalRow deal={deal} units={units} />
           </ASCard>
         </div>
 

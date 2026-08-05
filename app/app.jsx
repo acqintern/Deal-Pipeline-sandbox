@@ -3157,9 +3157,13 @@ Do not include any text outside the JSON object.`;
 
     const FOCUS_KEYWORDS = ['gross potential rent', 'gross scheduled income', 'effective gross income',
       'physical vacancy', 'loss to lease', 'concessions', 'bad debt', 'other income',
-      'total operating expenses', 'general and administrative', 'repairs and maintenance',
-      'payroll', 'management fee', 'marketing', 'contract services', 'property taxes',
-      'insurance', 'utilities', 'replacement reserves', 'pro forma', 'upgrade forecast',
+      'economic vacancy', 'stabilized vacancy', 'total operating expenses',
+      'general and administrative', 'repairs and maintenance', 'make ready', 'turnover',
+      'payroll', 'salaries', 'management fee', 'marketing', 'advertising',
+      'contract services', 'service contracts', 'landscape', 'landscaping', 'pest control',
+      'security', 'trash removal', 'garbage', 'recycling', 'property taxes', 'real estate tax',
+      'insurance', 'utilities', 'water', 'sewer', 'electric', 'gas expense',
+      'replacement reserves', 'pro forma', 'upgrade forecast',
       'asking price', 'purchase price', 'units', 'year built', 'capital improvements'];
     const combinedText = catNames.map((cat) =>
       `=== ${cat} DOCUMENT(S) ===\n` + byCat[cat].map((f) =>
@@ -3185,14 +3189,24 @@ Definitions:
 - gprAnnual = Gross Potential Rent, the TOP LINE of the T-12/OM income statement, annualized.
 - physVacLoss / lossToLease / badDebt / concessions = each an ANNUAL dollar loss (positive number), from that same income statement, directly below the GPR line.
 - effectiveGrossIncome = the in-place/current (NOT pro forma) Effective Gross Income line, if gprAnnual and the loss lines aren't separately broken out.
-- opex* = ANNUAL dollar total for that expense category from the T-12. Property taxes and insurance are almost always listed separately even when a "total operating expenses" subtotal above them excludes them — extract each individually regardless. opexReserves: a T-12 will almost never show this — if genuinely absent, return null (the caller applies a default), don't return 0.
+- opex* = ANNUAL dollar total for that expense category from the T-12. T-12s vary widely in layout — use the category's OWN section header when the T-12 has one, and fall back to these keywords line-by-line when it doesn't (a flat T-12 with no section headers is common):
+  - opexGA: "General & Administrative", "Administrative Expenses" — office, legal, bank fees, phone, dues, keys/locks, fire/water safety, cable/internet, model unit, corporate unit, fuel, rental expense, insurance waiver.
+  - opexMaintenance: "Repairs & Maintenance", "Operating & Maintenance", "Unit Make Ready", "Make Ready Expenses", "Turnover" — carpet, paint, plumbing, HVAC, electrical, appliance, cleaning, flooring, countertop, landscape supplies (not landscape contract — that's Contract Services below).
+  - opexPayroll: "Payroll", "Payroll & Benefits", "Salaries", "Payroll Costs" — maintenance/leasing salaries, bonuses, commissions, overtime, payroll processing, IT labor. Mom-and-pop T-12s may list "MANAGER", "MAINTENANCE", "GROUND" as salary line items — these count as payroll too.
+  - opexMarketing: "Marketing", "Advertising", "Advertising/Marketing/Promotions", "Leasing & Marketing".
+  - opexContractServices: "Contract Services", "Service Contracts", "Security" — landscape CONTRACT (not supplies), pest control contract, security patrol, garbage/recycling/trash removal. This category is frequently missed because these line items are scattered rather than grouped under one header — actively search for landscaping, pest control, and trash/garbage removal line items even if no "Contract Services" header exists anywhere.
+  - opexTaxes: "Property Taxes", "Real Estate Tax", "Real Property Taxes" — often combined with Insurance under a single "Taxes and Insurance" section; split by keyword if so.
+  - opexInsurance: "Property Insurance", "Insurance - Property", "Insurance - Liability".
+  - opexUtilities: "Utilities", "Utility Expenses" — electricity, gas, water/sewer (the EXPENSE side, not RUBS income), trash removal if billed as a utility rather than a contract.
+  - opexManagement: "Management Fee", "Management Fees" — typically shown as a % of EGI on the T-12 already; if only a % is shown, multiply by effectiveGrossIncome to get the annual dollar figure.
+  Property taxes and insurance are almost always listed separately even when a "total operating expenses" subtotal above them excludes them — extract each individually regardless of that subtotal. opexReserves: a T-12 will almost never show this — if genuinely absent, return null (the caller applies a default), don't return 0.
 - capex = ONLY a forward-looking renovation BUDGET the OM proposes the BUYER execute going forward (e.g. "recommended $8,000/unit interior program"). NEVER a historical figure describing capital the CURRENT owner already spent (e.g. "$3.68M invested since 2020," "recently renovated," "capital improvements completed") — that money is already reflected in the property's current condition and rents, not a cost Altus would incur. If the OM only describes past/completed capex, return null here, not that historical figure.
 - brokerEGI = the broker's PRO FORMA / stabilized "Upgrade Forecast" Effective Gross Income (not the in-place actual) — usually the last, right-most large dollar figure on the Effective Gross Income row.
 - brokerCapRate = the broker's advertised going-in cap rate as a percent number (e.g. 5.25, not 0.0525).
 - brokerRentPremium = the broker's assumed post-renovation rent premium, in $/unit/month.
 - brokerRenovPace = the broker's assumed renovation pace, in units turned per year.
 - brokerAncillaryIncomeMonthly = a NEW ancillary income initiative the broker advertises as upside (e.g. a RUBS utility-billback rollout, a new amenity/package/valet-trash fee program) that is NOT yet reflected in the current T-12's other income — in $/unit/month. Only the incremental NEW program, not existing other income already counted in otherIncome above.
-- brokerStabEconVac = the broker's stated or clearly implied STABILIZED (pro forma / post-lease-up) economic vacancy assumption, as a percent number (e.g. 12, not 0.12) — typically somewhere in the 10-14% range for a value-add deal; null if the OM doesn't address stabilized vacancy at all.
+- brokerStabEconVac = the broker's stated or clearly implied STABILIZED (pro forma / post-lease-up) ECONOMIC vacancy assumption, as a percent number (e.g. 12, not 0.12) — typically somewhere in the 10-14% range for a value-add deal. Economic vacancy is NOT the same as physical vacancy: economic vacancy = (physical vacancy loss + loss to lease + concessions + bad debt) ÷ Gross Potential Rent, so it is always equal to or higher than the physical (unit-count) vacancy rate. Do NOT return the physical/unit vacancy percentage here (that's typically 3-6% for a stabilized property and is a different, lower number) — if the OM only states physical vacancy and gives no economic/pro-forma vacancy figure, return null rather than substituting the physical vacancy rate.
 - assumableLoan = null UNLESS the OM explicitly describes an existing loan the buyer can assume (states an assumable balance, rate, origination date, and/or maturity). If present, fill whichever of rate/balance/origDate/maturity/amYears/ioYears are stated; null for any that aren't.
 - classification: physical-value-add means the NOI growth story depends on a capex/renovation program lifting rents on upgraded units; stabilized-operational means the broker is winning mostly on ancillary income/expense-line assumptions with little or no capex; blended is both.
 
@@ -3251,9 +3265,14 @@ ${combinedText}`;
     }
 
     // ---- Stabilized economic vacancy: adopt the broker's stated/implied stabilized assumption
-    // (normally 10-14% for a value-add deal); default to the 12% midpoint if the OM is silent ----
+    // (normally 10-14% for a value-add deal); default to the 12% midpoint if the OM is silent.
+    // Sanity floor: a figure under 8% is almost certainly the PHYSICAL vacancy rate mis-parsed
+    // as economic vacancy (economic vacancy includes loss-to-lease/concessions/bad debt on top
+    // of physical vacancy, so it's always the higher of the two) — fall back to the default
+    // rather than trust an implausibly low number. ----
     if (d.stabEconVac == null || d.stabEconVac === '') {
-      patchObj.stabEconVac = parsed.brokerStabEconVac != null ? parsed.brokerStabEconVac : 12;
+      const bv = parsed.brokerStabEconVac;
+      patchObj.stabEconVac = (bv != null && bv >= 8) ? bv : 12;
     }
     const stabEconVacPct = numOr(patchObj.stabEconVac != null ? patchObj.stabEconVac : d.stabEconVac, 12);
 
