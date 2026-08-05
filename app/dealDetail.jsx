@@ -898,7 +898,7 @@ function EditableTitle({ value, onCommit }) {
 }
 function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMUpload,
   t12Data, rrData, onT12Upload, onRRUpload, onClearOM, onClearT12, onClearRR,
-  onRunMarketReview, onRunMemo, onRunScreener, onImportCoStar,
+  onRunMarketReview, onRunMemo, onRunScreener, screenerData, onImportCoStar,
   todos, onAddTodo, onPatchTodo, onDeleteTodo, onViewTasks }) {
   const [tab, setTab] = useStateD('summary');
   const [propView, setPropView] = useStateD('combined');
@@ -915,14 +915,14 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
   }, []);
   const set = (k, v) => onPatch(deal.id, typeof k === 'object' ? k : { [k]: v });
   const patch = (obj) => onPatch(deal.id, obj);
-  const [screenerBusy, setScreenerBusy] = useStateD(false);
-  const [screenerErr, setScreenerErr] = useStateD(null);
-  const runScreener = async () => {
+  // Busy/error state lives in app-level screenerMap (passed down as screenerData), not local
+  // component state — that way it survives navigating off the deal and back, since the screen
+  // keeps running in the background regardless of whether this component is mounted.
+  const screenerBusy = screenerData && screenerData.status === 'running';
+  const screenerErr = screenerData && screenerData.status === 'error' ? screenerData.error : null;
+  const runScreener = () => {
     if (!onRunScreener || screenerBusy) return;
-    setScreenerBusy(true); setScreenerErr(null);
-    try { await onRunScreener(deal.id); }
-    catch (e) { setScreenerErr(String(e && e.message ? e.message : e)); }
-    finally { setScreenerBusy(false); }
+    onRunScreener(deal.id).catch(() => {}); // error is already surfaced via screenerData
   };
   const makeProperty = (i) => ({ id: 'p' + Date.now() + '_' + i, name: 'Property ' + (i + 1),
     market: deal.market || '', units: '', vintage: '', askPrice: '', purchasePrice: '', notes: '' });

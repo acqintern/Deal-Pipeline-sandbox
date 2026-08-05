@@ -525,24 +525,12 @@ function AnalystScreenTab({ deal, set }) {
 
           {/* Diligence questions — tailored to this deal's risk-adjusted return profile */}
           <ASCard>
-            <ASCardHead title="Diligence Questions" sub="Concise — bullet points only" />
-            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <ASLbl>Questions for the Broker</ASLbl>
-                <ASTextarea value={deal.analystBrokerQuestions} rows={5}
-                  placeholder="- Rent comp support for the assumed premium?
-- Deferred maintenance / PCA findings?
-- Utility billing structure (RUBS in place)?"
-                  onChange={(v) => set('analystBrokerQuestions', v)} />
-              </div>
-              <div>
-                <ASLbl>Internal Verification Checklist</ASLbl>
-                <ASTextarea value={deal.analystVerificationQuestions} rows={5}
-                  placeholder="- Market rent comps support the premium?
-- T-12 anomalies vs. trailing trend?
-- Renovation cost comps in this submarket?"
-                  onChange={(v) => set('analystVerificationQuestions', v)} />
-              </div>
+            <ASCardHead title="Questions for the Broker" sub="Concise — the big assumptions that move this deal, and why they believe them" />
+            <div style={{ padding: '16px 20px' }}>
+              <ASTextarea value={deal.analystBrokerQuestions} rows={5}
+                placeholder="- Why do you believe the $X/unit renovation premium is achievable at this pace?
+- What supports the new ancillary income program you're advertising?"
+                onChange={(v) => set('analystBrokerQuestions', v)} />
             </div>
           </ASCard>
 

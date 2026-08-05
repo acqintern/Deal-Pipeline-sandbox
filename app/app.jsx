@@ -2513,6 +2513,10 @@ function AltusApp() {
   const [omMap, setOMMap] = useS({});
   const [t12Map, setT12Map] = useS({});
   const [rrMap, setRRMap] = useS({});
+  // Screener busy/error state lives here (not as local DealDetail state) so it survives
+  // navigating off the deal and back — the button previously reset to idle on remount even
+  // though the screen was still running in the background.
+  const [screenerMap, setScreenerMap] = useS({});
   const [todos, setTodos] = useS(() => { try { return JSON.parse(localStorage.getItem(LS_TODOS)) || []; } catch { return []; } });
   const clearOM  = (id) => setOMMap( (m) => { const n = {...m}; delete n[id]; return n; });
   const addTodo    = (t)  => setTodos((ts) => [t, ...ts]);
@@ -3132,6 +3136,21 @@ Do not include any text outside the JSON object.`;
   // computeMetrics/computeUW — never left for the model to (mis)calculate.
   const runAnalystScreener = async (dealId) => {
     const numOr = (v, dflt) => (v == null || v === '' || isNaN(Number(v)) ? dflt : Number(v));
+    // Tracked in app-level state (not local component state) specifically so the screen keeps
+    // running — and the button reflects the right state when you come back — even if you
+    // navigate off the deal while it's in flight.
+    setScreenerMap((m) => ({ ...m, [dealId]: { status: 'running' } }));
+    try {
+      const result = await runAnalystScreenerInner(dealId, numOr);
+      setScreenerMap((m) => ({ ...m, [dealId]: { status: 'done' } }));
+      return result;
+    } catch (e) {
+      setScreenerMap((m) => ({ ...m, [dealId]: { status: 'error', error: String(e && e.message ? e.message : e) } }));
+      throw e;
+    }
+  };
+
+  const runAnalystScreenerInner = async (dealId, numOr) => {
     const d = (dealsRef.current || deals).find((x) => x.id === dealId);
     if (!d) return null;
     const docs = Array.isArray(d.documents) ? d.documents : [];
@@ -3164,30 +3183,43 @@ Do not include any text outside the JSON object.`;
       'security', 'trash removal', 'garbage', 'recycling', 'property taxes', 'real estate tax',
       'insurance', 'utilities', 'water', 'sewer', 'electric', 'gas expense',
       'replacement reserves', 'pro forma', 'upgrade forecast',
-      'asking price', 'purchase price', 'units', 'year built', 'capital improvements'];
-    const combinedText = catNames.map((cat) =>
+      'asking price', 'purchase price', 'units', 'year built', 'built in', 'construction',
+      'capital improvements', 'exclusively listed', 'investment sales', 'brokerage'];
+    const financialText = catNames.map((cat) =>
       `=== ${cat} DOCUMENT(S) ===\n` + byCat[cat].map((f) =>
         `--- ${f.name} ---\n${focusExcerpt(f.text, FOCUS_KEYWORDS, 18000)}`).join('\n\n')
     ).join('\n\n');
+    // Broker contacts sit on a different part of the OM (cover page / final contact pages) than
+    // the financial tables above — guarantee those pages are included the same way runOMParse does.
+    const omDocs = byCat['OM'] || [];
+    const contactText = omDocs.map((f) => contactExcerpt(f.text, 9000)).filter(Boolean).join('\n\n');
+    const combinedText = financialText + (contactText
+      ? '\n\n=== END-OF-OM CONTACT PAGES (extract EVERY person listed in this section) ===\n' + contactText
+      : '');
 
-    const prompt = `You are an Altus Equity acquisitions analyst extracting every figure needed to populate a multifamily deal record, from whatever OM / T-12 / rent roll / CoStar documents are provided below. Return ONLY valid JSON (no markdown, no commentary). Use null for anything not found or not stated anywhere — never guess or fabricate a number.
+    const prompt = `You are an Altus Equity acquisitions analyst extracting every figure needed to populate a multifamily deal record, from whatever OM / T-12 / rent roll / CoStar documents are provided below. Return ONLY valid JSON (no markdown, no commentary). Use null for ANYTHING not found or not stated anywhere — never guess, never fabricate, and never use 0 as a stand-in for "not found" (0 is only ever a real value for the loss lines below, which are legitimately zero on some T-12s).
 
 {
-  "units": 0, "vintage": "year(s) built as a string", "askPrice": 0, "capex": 0,
-  "gprAnnual": 0, "physVacLoss": 0, "lossToLease": 0, "badDebt": 0, "concessions": 0, "otherIncome": 0, "effectiveGrossIncome": 0,
-  "opexGA": 0, "opexMaintenance": 0, "opexPayroll": 0, "opexMarketing": 0, "opexContractServices": 0,
-  "opexTaxes": 0, "opexInsurance": 0, "opexUtilities": 0, "opexManagement": 0, "opexReserves": 0,
-  "brokerEGI": 0, "brokerCapRate": 0, "brokerRentPremium": 0, "brokerRenovPace": 0,
-  "brokerAncillaryIncomeMonthly": 0, "brokerStabEconVac": 0,
-  "assumableLoan": { "rate": 0, "balance": 0, "origDate": "YYYY-MM-DD", "maturity": "YYYY-MM-DD", "amYears": 0, "ioYears": 0 },
+  "market": null, "vintage": null, "units": null, "askPrice": null, "capex": null,
+  "brokerFirm": null, "brokerContacts": [{ "name": null, "title": null, "phone": null, "email": null }],
+  "gprAnnual": null, "physVacLoss": null, "lossToLease": null, "badDebt": null, "concessions": null, "otherIncome": null, "effectiveGrossIncome": null,
+  "opexGA": null, "opexMaintenance": null, "opexPayroll": null, "opexMarketing": null, "opexContractServices": null,
+  "opexTaxes": null, "opexInsurance": null, "opexUtilities": null, "opexManagement": null, "opexReserves": null,
+  "brokerEGI": null, "brokerCapRate": null, "brokerRentPremium": null, "brokerRenovPace": null,
+  "brokerAncillaryIncomeMonthly": null, "brokerStabEconVac": null,
+  "assumableLoan": { "rate": null, "balance": null, "origDate": null, "maturity": null, "amYears": null, "ioYears": null },
   "brokerStory": "2-3 sentences: what the broker is marketing and why (value-add scope, rent premium, exit assumption, why now)",
   "altusStoryRead": "2-3 sentences: is the plan credible for this vintage, what would have to be true for it to work",
   "classification": "one of: physical-value-add, stabilized-operational, blended"
 }
 
 Definitions:
+- market = "City, ST" — city and two-letter state only, no street address or ZIP.
+- vintage = the year the property was originally BUILT (construction vintage), not the renovation year. Look on the cover page, property-summary/highlights box, or a "Year Built"/"Built"/"Vintage" field. May read "Built in 1985", "Year Built: 1985", "1985 Vintage", or "Built 1986 / Renovated 2019" (take the BUILT year, 1986). For a multi-building property built in different years, return all of them joined exactly as printed, e.g. "1997/1986/1975". Return as a STRING; null if no construction year is stated anywhere.
+- brokerFirm = the full brokerage firm name from the cover page or "Exclusively Listed By" section.
+- brokerContacts = ONLY the named LISTING TEAM for this deal (1-6 people a buyer would actually contact) — the agents in the cover/"Exclusively Listed By" box and the final contact page(s). NEVER return a firm's full company directory/"our professionals" roster (a sign you're looking at one: 15+ names, no per-person phone/email, unrelated markets). Capture name + title even when phone/email aren't shown; use null for any missing field. Return [] if no individual listing contact is named anywhere.
 - gprAnnual = Gross Potential Rent, the TOP LINE of the T-12/OM income statement, annualized.
-- physVacLoss / lossToLease / badDebt / concessions = each an ANNUAL dollar loss (positive number), from that same income statement, directly below the GPR line.
+- physVacLoss / lossToLease / badDebt / concessions = each an ANNUAL dollar loss (positive number, 0 is a legitimate value here if the T-12 shows none), from that same income statement, directly below the GPR line.
 - effectiveGrossIncome = the in-place/current (NOT pro forma) Effective Gross Income line, if gprAnnual and the loss lines aren't separately broken out.
 - opex* = ANNUAL dollar total for that expense category from the T-12. T-12s vary widely in layout — use the category's OWN section header when the T-12 has one, and fall back to these keywords line-by-line when it doesn't (a flat T-12 with no section headers is common):
   - opexGA: "General & Administrative", "Administrative Expenses" — office, legal, bank fees, phone, dues, keys/locks, fire/water safety, cable/internet, model unit, corporate unit, fuel, rental expense, insurance waiver.
@@ -3202,9 +3234,9 @@ Definitions:
   Property taxes and insurance are almost always listed separately even when a "total operating expenses" subtotal above them excludes them — extract each individually regardless of that subtotal. opexReserves: a T-12 will almost never show this — if genuinely absent, return null (the caller applies a default), don't return 0.
 - capex = ONLY a forward-looking renovation BUDGET the OM proposes the BUYER execute going forward (e.g. "recommended $8,000/unit interior program"). NEVER a historical figure describing capital the CURRENT owner already spent (e.g. "$3.68M invested since 2020," "recently renovated," "capital improvements completed") — that money is already reflected in the property's current condition and rents, not a cost Altus would incur. If the OM only describes past/completed capex, return null here, not that historical figure.
 - brokerEGI = the broker's PRO FORMA / stabilized "Upgrade Forecast" Effective Gross Income (not the in-place actual) — usually the last, right-most large dollar figure on the Effective Gross Income row.
-- brokerCapRate = the broker's advertised going-in cap rate as a percent number (e.g. 5.25, not 0.0525).
-- brokerRentPremium = the broker's assumed post-renovation rent premium, in $/unit/month.
-- brokerRenovPace = the broker's assumed renovation pace, in units turned per year.
+- brokerCapRate = the broker's advertised going-in cap rate as a percent number (e.g. 5.25, not 0.0525). It is VERY common for an OM to state pricing guidance with no cap rate at all — if so, return null. A real cap rate is never 0; never return 0 here.
+- brokerRentPremium = the broker's assumed post-renovation rent premium, in $/unit/month. null if the OM states no specific renovation premium; never 0.
+- brokerRenovPace = the broker's assumed renovation pace, in units turned per year. null if unstated; never 0.
 - brokerAncillaryIncomeMonthly = a NEW ancillary income initiative the broker advertises as upside (e.g. a RUBS utility-billback rollout, a new amenity/package/valet-trash fee program) that is NOT yet reflected in the current T-12's other income — in $/unit/month. Only the incremental NEW program, not existing other income already counted in otherIncome above.
 - brokerStabEconVac = the broker's stated or clearly implied STABILIZED (pro forma / post-lease-up) ECONOMIC vacancy assumption, as a percent number (e.g. 12, not 0.12) — typically somewhere in the 10-14% range for a value-add deal. Economic vacancy is NOT the same as physical vacancy: economic vacancy = (physical vacancy loss + loss to lease + concessions + bad debt) ÷ Gross Potential Rent, so it is always equal to or higher than the physical (unit-count) vacancy rate. Do NOT return the physical/unit vacancy percentage here (that's typically 3-6% for a stabilized property and is a different, lower number) — if the OM only states physical vacancy and gives no economic/pro-forma vacancy figure, return null rather than substituting the physical vacancy rate.
 - assumableLoan = null UNLESS the OM explicitly describes an existing loan the buyer can assume (states an assumable balance, rate, origination date, and/or maturity). If present, fill whichever of rate/balance/origDate/maturity/amYears/ioYears are stated; null for any that aren't.
@@ -3219,14 +3251,62 @@ ${combinedText}`;
 
     // ---- Build the patch — fill blanks only for raw extracted data, never clobber a figure
     // the analyst already entered by hand (e.g. a negotiated UW price or an already-set field) ----
-    const fillIfBlank = ['units', 'vintage', 'askPrice', 'capex', 'gprAnnual', 'physVacLoss', 'lossToLease',
+    const fillIfBlank = ['market', 'vintage', 'units', 'askPrice', 'capex', 'gprAnnual', 'physVacLoss', 'lossToLease',
       'badDebt', 'concessions', 'otherIncome', 'opexGA', 'opexMaintenance', 'opexPayroll', 'opexMarketing',
       'opexContractServices', 'opexTaxes', 'opexInsurance', 'opexUtilities', 'opexManagement',
-      'brokerEGI', 'brokerCapRate', 'brokerRentPremium', 'brokerRenovPace'];
+      'brokerEGI', 'brokerFirm'];
+    // brokerCapRate/brokerRentPremium/brokerRenovPace are never legitimately 0 in reality — a
+    // 0 here almost always means the model defaulted to it instead of returning null when the
+    // OM simply didn't state one (e.g. pricing guidance given with no advertised cap rate).
+    // Treat 0 as "not found" for these specifically, unlike the loss lines above where 0 is real.
+    const ZERO_MEANS_MISSING = ['brokerCapRate', 'brokerRentPremium', 'brokerRenovPace'];
     const patchObj = {};
     fillIfBlank.forEach((k) => {
       if (parsed[k] != null && parsed[k] !== '' && (d[k] == null || d[k] === '' || d[k] === 0)) patchObj[k] = parsed[k];
     });
+    ZERO_MEANS_MISSING.forEach((k) => {
+      const v = parsed[k];
+      if (v != null && v !== '' && v !== 0 && (d[k] == null || d[k] === '' || d[k] === 0)) patchObj[k] = v;
+    });
+
+    // ---- Broker contacts → CRM sync (same dedupe/cap-at-6 pattern as the OM upload flow) ----
+    const parsedContacts = Array.isArray(parsed.brokerContacts) ? parsed.brokerContacts : [];
+    const namedContacts = parsedContacts.filter((c) => c && c.name);
+    const withInfo = namedContacts.filter((c) => c.email || c.phone);
+    const people = (withInfo.length ? withInfo : namedContacts).slice(0, 6);
+    if (people.length) {
+      setContacts((cs) => {
+        let next = [...cs];
+        let firstId = d.contactId || null;
+        const withDeal = (arr) => Array.from(new Set([...(Array.isArray(arr) ? arr : []), dealId]));
+        people.forEach((pc, idx) => {
+          const existing = next.find((c) =>
+            pc.email && c.email && c.email.toLowerCase() === pc.email.toLowerCase() ||
+            pc.name && c.name && c.name.toLowerCase() === pc.name.toLowerCase()
+          );
+          if (existing) {
+            if (!firstId) firstId = existing.id;
+            next = next.map((c) => c.id === existing.id ? {
+              ...c, lastActivity: window.ALTUS_TODAY,
+              title: c.title || pc.title || '', firm: c.firm || parsed.brokerFirm || '',
+              dealIds: withDeal(c.dealIds)
+            } : c);
+          } else {
+            const newId = 'c-' + Date.now() + '-' + idx;
+            if (!firstId) firstId = newId;
+            next.push({
+              id: newId, name: pc.name || '', firm: parsed.brokerFirm || '',
+              title: pc.title || '', email: pc.email || '', phone: pc.phone || '',
+              markets: parsed.market || d.market || '', property: d.name || '',
+              dealIds: [dealId], notes: '',
+              dateAdded: window.ALTUS_TODAY, lastActivity: window.ALTUS_TODAY
+            });
+          }
+        });
+        if (firstId && !d.contactId) patchObj.contactId = firstId;
+        return next;
+      });
+    }
 
     const units = Number(patchObj.units || d.units) || 0;
     // Reserves: use whatever the documents actually stated; otherwise Altus's $250/unit default —
@@ -3313,6 +3393,7 @@ ${combinedText}`;
     const yieldOnCostSpreadBps = (y3 && totalBasis > 0) ? Math.round(((y3.noi / totalBasis) - m.goingInCap) * 10000) : null;
     const spreadPass = yieldOnCostSpreadBps != null && yieldOnCostSpreadBps >= 100;
     const dealIRR = uw ? uw.irr : null;
+    const avgCoC = uw ? uw.avgYield : null;
 
     // Risk-adjusted return hurdle (sliding scale) — mirrors the analyst-screen/multifamily-uw
     // skill: 4.0%→22%, 5.0%→20%, 7.0%+→15% (floor). A lower going-in cap rate carries more risk
@@ -3321,11 +3402,21 @@ ${combinedText}`;
       : goingInCapPct >= 5 ? 20 - 2.5 * (goingInCapPct - 5)
       : 22 - 2 * (goingInCapPct - 4);
     const irrPass = dealIRR == null ? null : (dealIRR * 100) >= requiredIRRPct;
-    const irrNote = () => irrPass === false
+    // Frames the deal the way an MD actually thinks about it: does the return justify what has
+    // to go right operationally — capital injected to capture the rent premium, or an
+    // operational-efficiency lift where the opex benchmark flags room to run leaner.
+    const capitalNote = parsed.classification === 'stabilized-operational'
+      ? 'This deal leans on operational efficiency rather than capital injection — check the Operating Expense Benchmark section for lines running above range that could fund the return without a renovation program.'
+      : parsed.classification === 'blended'
+      ? 'This deal leans on both a capital program to capture rent premium AND some operational efficiency — both need to pencil, not just one.'
+      : 'This deal requires injecting real capital to capture the assumed rent premium — the return has to justify that capital outlay, not just the going-in numbers.';
+    const returnSummary = ` Average cash-on-cash across the hold: ${avgCoC != null ? (avgCoC * 100).toFixed(1) + '%' : 'not available yet'}.`;
+    const irrNote = () => (irrPass === false
       ? ` However, the Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) is below the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar this going-in cap rate requires.`
       : irrPass == null
       ? ` IRR wasn't available to check against the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar — confirm once Full UW assumptions are entered.`
-      : ` The Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) also clears the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar.`;
+      : ` The Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) also clears the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar.`)
+      + returnSummary + ' ' + capitalNote;
 
     let gbStatus, analystVerdict, verdictReason;
     if (!hurdlePass) {
@@ -3341,42 +3432,38 @@ ${combinedText}`;
       verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle and the yield-on-cost spread (${yieldOnCostSpreadBps} bps) clears the 100 bps gate.` + irrNote();
     } else {
       gbStatus = "GB Don't Review"; analystVerdict = 'watch';
-      verdictReason = yieldOnCostSpreadBps == null
+      verdictReason = (yieldOnCostSpreadBps == null
         ? "Going-in cap rate clears the hurdle, but Year-3 stabilized NOI isn't available to test the yield-on-cost spread — enter a hold period ≥3 years and stabilized assumptions in Full UW to complete the screen."
-        : `Going-in cap rate clears the hurdle, but the yield-on-cost spread (${yieldOnCostSpreadBps} bps) is below the 100 bps gate — the capital program isn't earning its keep even though the in-place basis is fine.`;
+        : `Going-in cap rate clears the hurdle, but the yield-on-cost spread (${yieldOnCostSpreadBps} bps) is below the 100 bps gate — the capital program isn't earning its keep even though the in-place basis is fine.`)
+        + returnSummary + ' ' + capitalNote;
     }
     patchObj.status = gbStatus;
     patchObj.analystVerdict = analystVerdict;
     patchObj.analystVerdictNotes = verdictReason;
 
-    // ---- Diligence questions — a second, focused pass now that the numbers are known, so the
-    // questions are actually tailored to what THIS deal's risk profile demands rather than a
-    // generic checklist. Same sliding-scale principle as the verdict above: a lower going-in cap
-    // rate needs a materially higher IRR to clear, so a low-cap/high-vacancy deal should be
-    // interrogated on whether that higher return is achievable; a high-cap/stabilized deal should
-    // be interrogated on whether the in-place numbers are real and durable. ----
-    const qPrompt = `You are an Altus Equity acquisitions analyst preparing due diligence questions for a multifamily deal. Be extremely concise — short bullet points only, one sentence each, no preamble, no explanation.
+    // ---- Broker questions — focused on the BIG assumptions that actually move this deal's
+    // return (renovation program, new ancillary income), and WHY the broker believes them —
+    // not a generic diligence checklist. ----
+    const qPrompt = `You are an Altus Equity acquisitions analyst preparing questions to ask a broker about a multifamily deal. Be extremely concise — short bullet points only, one sentence each, no preamble, no explanation.
 
 DEAL SUMMARY:
-Going-in cap rate: ${goingInCapPct.toFixed(2)}% (required risk-adjusted IRR for this cap rate: ${requiredIRRPct.toFixed(1)}%)
+Going-in cap rate: ${goingInCapPct.toFixed(2)}%
 Classification: ${parsed.classification || 'unknown'}
-Verdict: ${gbStatus} — ${verdictReason}
 Broker's story: ${parsed.brokerStory || 'n/a'}
+Broker's assumed rent premium: ${parsed.brokerRentPremium != null ? '$' + parsed.brokerRentPremium + '/unit/mo' : 'not stated'}
+Broker's assumed renovation pace: ${parsed.brokerRenovPace != null ? parsed.brokerRenovPace + ' units/yr' : 'not stated'}
+Broker's advertised new ancillary income program: ${parsed.brokerAncillaryIncomeMonthly != null ? '$' + parsed.brokerAncillaryIncomeMonthly + '/unit/mo' : 'not stated'}
 
-Guiding principle: a LOWER going-in cap rate is more speculative (leans on lease-up/renovation execution) and needs a HIGHER return to compensate — questions for that kind of deal should probe whether that higher return is actually achievable (rent comp support, lease-up pace precedent, renovation cost realism). A HIGHER going-in cap rate is more stabilized and needs less unproven upside — questions for that kind of deal should focus on confirming the in-place numbers are real and durable, not on speculative upside. Tailor both lists to THIS deal's actual numbers above, not a generic checklist.
+Only ask about the BIG assumptions that actually move this deal's return — the renovation program (rent premium, pace, scope) if there is one, and any new ancillary/other-income initiative if there is one. For each, the goal is understanding WHY the broker believes it's achievable, not confirming paperwork. Skip anything not listed above (don't invent a renovation question if there's no renovation program). If neither a renovation program nor a new ancillary income program is stated, return an empty string.
 
 Return ONLY valid JSON, no markdown:
 {
-  "brokerQuestions": "a bulleted list as ONE string, each question on its own line prefixed with '- ', 4-7 questions max — things to literally ask the broker/seller",
-  "verificationQuestions": "same format — things Altus needs to independently verify/confirm before this deal makes sense, NOT broker-facing (market rent comps, renovation cost comps, T-12 anomalies, occupancy trend, etc.)"
+  "brokerQuestions": "a bulleted list as ONE string, each question on its own line prefixed with '- ', 2-5 questions max"
 }`;
     try {
-      const qOut = await aiComplete(qPrompt, { maxTokens: 900 });
+      const qOut = await aiComplete(qPrompt, { maxTokens: 500 });
       const qParsed = safeParseJSON(qOut);
-      if (qParsed) {
-        if (qParsed.brokerQuestions) patchObj.analystBrokerQuestions = qParsed.brokerQuestions;
-        if (qParsed.verificationQuestions) patchObj.analystVerificationQuestions = qParsed.verificationQuestions;
-      }
+      if (qParsed && qParsed.brokerQuestions) patchObj.analystBrokerQuestions = qParsed.brokerQuestions;
     } catch (e) { /* questions are a bonus on top of the verdict — don't fail the whole screen over them */ }
 
     const result = { ...parsed, gbStatus, analystVerdict, verdictReason, goingInCapPct, yieldOnCostSpreadBps };
@@ -3685,7 +3772,7 @@ ${text}`;
         t12Data={t12Map[deal.id]} rrData={rrMap[deal.id]}
         onT12Upload={handleT12Upload} onRRUpload={handleRentRollUpload}
         onClearOM={clearOM} onClearT12={clearT12} onClearRR={clearRR}
-        onRunMarketReview={runMarketReview} onRunMemo={runMemoNarrative} onRunScreener={runAnalystScreener} onImportCoStar={importCoStar}
+        onRunMarketReview={runMarketReview} onRunMemo={runMemoNarrative} onRunScreener={runAnalystScreener} screenerData={screenerMap[deal.id]} onImportCoStar={importCoStar}
         todos={todos} onAddTodo={addTodo} onPatchTodo={patchTodo} onDeleteTodo={deleteTodo}
         onViewTasks={() => { setOpenId(null); setView('tasks'); }} /> :
         view === 'pipeline' ? <PipelineView deals={pipelineDeals} allDeals={deals} onOpen={open} onPatch={patch}
