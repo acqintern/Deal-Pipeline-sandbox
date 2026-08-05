@@ -674,6 +674,7 @@ function DetailTabs({ tab, setTab, showProperties }) {
   const tabs = [
   { key: 'summary', label: 'Summary', icon: 'deal' },
   ...(showProperties ? [{ key: 'properties', label: 'Properties', icon: 'bank' }] : []),
+  { key: 'analyst', label: 'Analyst Screener', icon: 'flag' },
   { key: 'quickuw', label: 'Quick UW', icon: 'target' },
   { key: 'fulluw', label: 'Full UW', icon: 'calc' },
   { key: 'returns', label: 'Returns', icon: 'chart' },
@@ -1318,6 +1319,9 @@ function DealDetail({ deal, onBack, onPatch, omData, onAcceptOM, contacts, onOMU
             )}
           </div>
         }
+
+        {/* ===== ANALYST SCREENER ===== */}
+        {tab === 'analyst' && window.AnalystScreenTab && <window.AnalystScreenTab deal={deal} set={set} />}
 
         {/* ===== QUICK UNDERWRITING ===== */}
         {tab === 'quickuw' && window.QuickUnderwritingTab && <window.QuickUnderwritingTab deal={deal} set={set} />}
