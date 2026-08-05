@@ -205,13 +205,10 @@ function AnalystScreenTab({ deal, set }) {
   const noiBps = capDelta != null ? Math.round(capDelta * 10000) : null;
 
   // Hurdle math
-  const passesHurdle = altusCap != null && altusCap >= HURDLE;
-  const hurdleGap = altusCap != null ? altusCap - HURDLE : null; // negative = miss
   const priceToClose = altusNOI > 0 ? altusNOI / HURDLE : null; // price needed to hit 6.5%
   const priceDelta = priceToClose && price ? price - priceToClose : null; // positive = overpaying
 
   // Analyst fields
-  const analystVintageFit = deal.analystVintageFit || '';
   const analystVerdict = deal.analystVerdict || '';
 
   const inputSty = { border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px',
@@ -235,7 +232,7 @@ function AnalystScreenTab({ deal, set }) {
 
       {/* ── Hurdle verdict banner ── */}
       <ASCard>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr auto 1fr auto 1fr', alignItems: 'center', padding: '20px 28px', gap: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr auto 1fr', alignItems: 'center', padding: '20px 28px', gap: 0 }}>
           {/* Going-in cap */}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>
@@ -252,16 +249,6 @@ function AnalystScreenTab({ deal, set }) {
 
           {/* vs arrow */}
           <div style={{ padding: '0 24px', color: 'var(--faint)', fontSize: 18 }}>vs</div>
-
-          {/* Hurdle */}
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Altus Hurdle</div>
-            <div className="num" style={{ fontSize: 36, fontWeight: 800, lineHeight: 1, color: 'var(--slate)' }}>6.50%</div>
-            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>going-in cap minimum</div>
-          </div>
-
-          {/* divider */}
-          <div style={{ width: 1, height: 64, background: 'var(--line)', margin: '0 24px' }} />
 
           {/* Stabilized YOC */}
           <div style={{ textAlign: 'center' }}>
@@ -284,34 +271,16 @@ function AnalystScreenTab({ deal, set }) {
           {/* divider */}
           <div style={{ width: 1, height: 64, background: 'var(--line)', margin: '0 24px' }} />
 
-          {/* Verdict */}
+          {/* BPS Lift */}
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Verdict</div>
-            {altusCap == null ? (
-              <div style={{ fontSize: 14, color: 'var(--faint)', fontStyle: 'italic' }}>Enter pricing + income to compute</div>
-            ) : passesHurdle ? (
-              <React.Fragment>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 20px',
-                  background: 'var(--pos-soft)', border: '1px solid var(--pos)', borderRadius: 999 }}>
-                  <Icon name="check" size={15} style={{ color: 'var(--pos)' }} />
-                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--pos)' }}>Clears Hurdle</span>
-                </div>
-                <div className="num" style={{ fontSize: 11.5, color: 'var(--pos)', marginTop: 6 }}>
-                  +{(hurdleGap * 100).toFixed(0)} bps above threshold
-                </div>
-              </React.Fragment>
-            ) : (
-              <React.Fragment>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 20px',
-                  background: 'var(--neg-soft)', border: '1px solid var(--neg)', borderRadius: 999 }}>
-                  <Icon name="close" size={15} style={{ color: 'var(--neg)' }} />
-                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--neg)' }}>Misses Hurdle</span>
-                </div>
-                <div className="num" style={{ fontSize: 11.5, color: 'var(--neg)', marginTop: 6 }}>
-                  {Math.abs(hurdleGap * 100).toFixed(0)} bps short
-                </div>
-              </React.Fragment>
-            )}
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Going-In → Stabilized</div>
+            <div className="num" style={{ fontSize: 36, fontWeight: 800, lineHeight: 1,
+              color: stabBps == null ? 'var(--faint)' : stabBps >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+              {stabBps != null ? (stabBps >= 0 ? '+' : '') + stabBps : '—'}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>
+              {stabBps != null ? 'bps lift' : 'fill Full UW to compute'}
+            </div>
           </div>
         </div>
       </ASCard>
@@ -430,7 +399,7 @@ function AnalystScreenTab({ deal, set }) {
                 <div style={{ fontSize: 13, color: 'var(--faint)', fontStyle: 'italic' }}>
                   Enter purchase price and income to compute the bridge.
                 </div>
-              ) : passesHurdle ? (
+              ) : altusCap != null && altusCap >= HURDLE ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10,
                     padding: '12px 16px', background: 'var(--pos-soft)',
@@ -442,7 +411,7 @@ function AnalystScreenTab({ deal, set }) {
                   </div>
                   <BridgeRow label="NOI at current price" value={moneyA(altusNOI)} accent="var(--accent)" />
                   <BridgeRow label="Cap rate" value={(altusCap * 100).toFixed(2) + '%'} accent="var(--pos)" />
-                  <BridgeRow label="Headroom above 6.5%" value={'+' + (hurdleGap * 100).toFixed(0) + ' bps'} accent="var(--pos)" />
+                  <BridgeRow label="Headroom above 6.5%" value={'+' + ((altusCap - HURDLE) * 100).toFixed(0) + ' bps'} accent="var(--pos)" />
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -451,7 +420,7 @@ function AnalystScreenTab({ deal, set }) {
                     border: '1px solid rgba(184,114,20,.25)', borderRadius: 8 }}>
                     <Icon name="flag" size={14} style={{ color: 'var(--warn)', flex: 'none' }} />
                     <div style={{ fontSize: 13, color: 'var(--warn)' }}>
-                      Deal misses by <span className="num" style={{ fontWeight: 700 }}>{Math.abs(hurdleGap * 100).toFixed(0)} bps</span>.
+                      Deal misses by <span className="num" style={{ fontWeight: 700 }}>{Math.abs((altusCap - HURDLE) * 100).toFixed(0)} bps</span>.
                       Use the numbers below to negotiate or reprice.
                     </div>
                   </div>
@@ -507,22 +476,7 @@ function AnalystScreenTab({ deal, set }) {
                   placeholder="Summarize what the broker is marketing: value-add scope, rent premium, renovation pace, exit assumption, any stated upside drivers…"
                   onChange={(v) => set('analystBrokerStory', v)} />
               </div>
-              <div>
-                <ASLbl>Vintage / Capex Fit</ASLbl>
-                <select value={analystVintageFit}
-                  onChange={(e) => set('analystVintageFit', e.target.value)}
-                  style={inputSty}>
-                  <option value="">— select —</option>
-                  <option value="good">Good fit — scope matches vintage and condition</option>
-                  <option value="marginal">Marginal — plan works but execution risk is real</option>
-                  <option value="poor">Poor fit — scope / vintage mismatch, credibility issue</option>
-                </select>
-                {analystVintageFit === 'poor' && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--neg)' }}>
-                    Flag this in the IC memo. Credibility of the renovation plan is a primary risk.
-                  </div>
-                )}
-              </div>
+
               <div>
                 <ASLbl>Altus Read on the Story</ASLbl>
                 <ASTextarea value={deal.analystStoryRead} rows={4}
@@ -546,7 +500,7 @@ function AnalystScreenTab({ deal, set }) {
                     placeholder="e.g. 150" />
                   {deal.analystRentPremium && (
                     <div className="num" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
-                      {moneyA(numA(deal.analystRentPremium) * 12 * units)}/yr portfolio-wide
+                      {moneyA(numA(deal.analystRentPremium) * 12 * numA(deal.analystRenovUnits || units))}/yr · {numA(deal.analystRenovUnits || units)} units renovated
                     </div>
                   )}
                 </div>
@@ -556,6 +510,18 @@ function AnalystScreenTab({ deal, set }) {
                     onChange={(v) => set('analystPace', v === '' ? null : Number(v))}
                     suffix="turns/yr"
                     placeholder="e.g. 30" />
+                </div>
+                <div>
+                  <ASLbl>Units Being Renovated</ASLbl>
+                  <ASInput value={deal.analystRenovUnits ?? ''}
+                    onChange={(v) => set('analystRenovUnits', v === '' ? null : Number(v))}
+                    suffix="units"
+                    placeholder={String(units)} />
+                  {deal.analystRenovUnits && units > 0 && (
+                    <div className="num" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+                      {((numA(deal.analystRenovUnits) / units) * 100).toFixed(0)}% of {units} total units
+                    </div>
+                  )}
                 </div>
                 <div>
                   <ASLbl>Broker's Stated Premium</ASLbl>
