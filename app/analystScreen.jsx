@@ -523,6 +523,29 @@ function AnalystScreenTab({ deal, set }) {
             </div>
           </ASCard>
 
+          {/* Diligence questions — tailored to this deal's risk-adjusted return profile */}
+          <ASCard>
+            <ASCardHead title="Diligence Questions" sub="Concise — bullet points only" />
+            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <ASLbl>Questions for the Broker</ASLbl>
+                <ASTextarea value={deal.analystBrokerQuestions} rows={5}
+                  placeholder="- Rent comp support for the assumed premium?
+- Deferred maintenance / PCA findings?
+- Utility billing structure (RUBS in place)?"
+                  onChange={(v) => set('analystBrokerQuestions', v)} />
+              </div>
+              <div>
+                <ASLbl>Internal Verification Checklist</ASLbl>
+                <ASTextarea value={deal.analystVerificationQuestions} rows={5}
+                  placeholder="- Market rent comps support the premium?
+- T-12 anomalies vs. trailing trend?
+- Renovation cost comps in this submarket?"
+                  onChange={(v) => set('analystVerificationQuestions', v)} />
+              </div>
+            </div>
+          </ASCard>
+
           {/* Value-add assumption */}
           <ASCard>
             <ASCardHead title="Altus Value-Add View"

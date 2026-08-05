@@ -3349,6 +3349,36 @@ ${combinedText}`;
     patchObj.analystVerdict = analystVerdict;
     patchObj.analystVerdictNotes = verdictReason;
 
+    // ---- Diligence questions — a second, focused pass now that the numbers are known, so the
+    // questions are actually tailored to what THIS deal's risk profile demands rather than a
+    // generic checklist. Same sliding-scale principle as the verdict above: a lower going-in cap
+    // rate needs a materially higher IRR to clear, so a low-cap/high-vacancy deal should be
+    // interrogated on whether that higher return is achievable; a high-cap/stabilized deal should
+    // be interrogated on whether the in-place numbers are real and durable. ----
+    const qPrompt = `You are an Altus Equity acquisitions analyst preparing due diligence questions for a multifamily deal. Be extremely concise — short bullet points only, one sentence each, no preamble, no explanation.
+
+DEAL SUMMARY:
+Going-in cap rate: ${goingInCapPct.toFixed(2)}% (required risk-adjusted IRR for this cap rate: ${requiredIRRPct.toFixed(1)}%)
+Classification: ${parsed.classification || 'unknown'}
+Verdict: ${gbStatus} — ${verdictReason}
+Broker's story: ${parsed.brokerStory || 'n/a'}
+
+Guiding principle: a LOWER going-in cap rate is more speculative (leans on lease-up/renovation execution) and needs a HIGHER return to compensate — questions for that kind of deal should probe whether that higher return is actually achievable (rent comp support, lease-up pace precedent, renovation cost realism). A HIGHER going-in cap rate is more stabilized and needs less unproven upside — questions for that kind of deal should focus on confirming the in-place numbers are real and durable, not on speculative upside. Tailor both lists to THIS deal's actual numbers above, not a generic checklist.
+
+Return ONLY valid JSON, no markdown:
+{
+  "brokerQuestions": "a bulleted list as ONE string, each question on its own line prefixed with '- ', 4-7 questions max — things to literally ask the broker/seller",
+  "verificationQuestions": "same format — things Altus needs to independently verify/confirm before this deal makes sense, NOT broker-facing (market rent comps, renovation cost comps, T-12 anomalies, occupancy trend, etc.)"
+}`;
+    try {
+      const qOut = await aiComplete(qPrompt, { maxTokens: 900 });
+      const qParsed = safeParseJSON(qOut);
+      if (qParsed) {
+        if (qParsed.brokerQuestions) patchObj.analystBrokerQuestions = qParsed.brokerQuestions;
+        if (qParsed.verificationQuestions) patchObj.analystVerificationQuestions = qParsed.verificationQuestions;
+      }
+    } catch (e) { /* questions are a bonus on top of the verdict — don't fail the whole screen over them */ }
+
     const result = { ...parsed, gbStatus, analystVerdict, verdictReason, goingInCapPct, yieldOnCostSpreadBps };
     patch(dealId, patchObj);
     return result;
