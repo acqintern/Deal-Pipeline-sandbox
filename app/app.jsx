@@ -3238,23 +3238,29 @@ Do not include any text outside the JSON object.`;
 
     const prompt = `You are an Altus Equity acquisitions analyst extracting every figure needed to populate a multifamily deal record, from whatever OM / T-12 / rent roll / CoStar documents are provided below. Return ONLY valid JSON (no markdown, no commentary). Use null for ANYTHING not found or not stated anywhere — never guess, never fabricate, and never use 0 as a stand-in for "not found" (0 is only ever a real value for the loss lines below, which are legitimately zero on some T-12s).
 
+Structured/numeric fields FIRST in your response, free-text narrative fields LAST — if you run short on space, the numbers must not be sacrificed for the prose.
+
 {
   "market": null, "vintage": null, "units": null, "askPrice": null, "capex": null,
-  "brokerFirm": null, "brokerContacts": [{ "name": null, "title": null, "phone": null, "email": null }],
   "gprAnnual": null, "physVacLoss": null, "lossToLease": null, "badDebt": null, "concessions": null, "otherIncome": null, "effectiveGrossIncome": null,
+  "marketRentPerUnit": null,
   "opexGA": null, "opexMaintenance": null, "opexPayroll": null, "opexMarketing": null, "opexContractServices": null,
   "opexTaxes": null, "opexInsurance": null, "opexUtilities": null, "opexManagement": null, "opexReserves": null,
   "brokerEGI": null, "brokerCapRate": null, "brokerRentPremium": null, "brokerRenovPace": null,
   "brokerAncillaryIncomeMonthly": null, "brokerStabEconVac": null,
   "assumableLoan": { "rate": null, "balance": null, "origDate": null, "maturity": null, "amYears": null, "ioYears": null },
+  "marketSupplyPipeline": null, "marketPopGrowth": null, "marketMedianIncome": null, "marketRentGrowth": null, "marketVacancy": null,
+  "brokerFirm": null, "brokerContacts": [{ "name": null, "title": null, "phone": null, "email": null }],
+  "classification": "one of: physical-value-add, stabilized-operational, blended",
+  "marketSupportSummary": "if a CoStar/submarket report is provided: 1-2 sentences citing the specific figures above and whether they support or undermine the case for further rent growth. null if no CoStar report is provided.",
   "brokerStory": "2-3 sentences: what the broker is marketing and why (value-add scope, rent premium, exit assumption, why now)",
-  "altusStoryRead": "2-4 sentences: is the plan credible for this vintage, what would have to be true for it to work, and — if a CoStar submarket report is provided — whether area income actually supports the assumed rent growth",
-  "marketSupportSummary": "if a CoStar/submarket report is provided: 1-2 sentences citing the specific supply pipeline, population growth, and median income figures found, plus any other data point from the report that supports or undermines the investment case. null if no CoStar report is provided.",
-  "classification": "one of: physical-value-add, stabilized-operational, blended"
+  "altusStoryRead": "2-3 sentences: is the plan credible for this vintage, what would have to be true for it to work"
 }
 
 Definitions:
 - market = "City, ST" — city and two-letter state only, no street address or ZIP.
+- askPrice = the broker's guidance/asking price. Check the cover page investment-summary box first (common phrasings: "Offering Price," "Asking Price," "Price Guidance," "Contact Broker for Pricing" — if it says "contact for pricing" with no number, return null, don't guess). If no explicit dollar figure appears ANYWHERE but the OM states a cap rate, still return null here — the caller derives an implied price from the cap rate separately, don't do that math yourself.
+- marketRentPerUnit = current MARKET (asking, not in-place actual) rent in $/unit/month — usually the rent roll's or OM's per-unit market/asking rent figure, or GPR annual ÷ units ÷ 12 if only the annual GPR total is given.
 - vintage = the year the property was originally BUILT (construction vintage), not the renovation year. Look on the cover page, property-summary/highlights box, or a "Year Built"/"Built"/"Vintage" field. May read "Built in 1985", "Year Built: 1985", "1985 Vintage", or "Built 1986 / Renovated 2019" (take the BUILT year, 1986). For a multi-building property built in different years, return all of them joined exactly as printed, e.g. "1997/1986/1975". Return as a STRING; null if no construction year is stated anywhere.
 - brokerFirm = the full brokerage firm name from the cover page or "Exclusively Listed By" section.
 - brokerContacts = ONLY the named LISTING TEAM for this deal (1-6 people a buyer would actually contact) — the agents in the cover/"Exclusively Listed By" box and the final contact page(s). NEVER return a firm's full company directory/"our professionals" roster (a sign you're looking at one: 15+ names, no per-person phone/email, unrelated markets). Capture name + title even when phone/email aren't shown; use null for any missing field. Return [] if no individual listing contact is named anywhere.
@@ -3282,21 +3288,32 @@ Definitions:
 - brokerStabEconVac = the broker's stated or clearly implied STABILIZED (pro forma / post-lease-up) ECONOMIC vacancy assumption, as a percent number (e.g. 12, not 0.12) — typically somewhere in the 10-14% range for a value-add deal. Economic vacancy is NOT the same as physical vacancy: economic vacancy = (physical vacancy loss + loss to lease + concessions + bad debt) ÷ Gross Potential Rent, so it is always equal to or higher than the physical (unit-count) vacancy rate. Do NOT return the physical/unit vacancy percentage here (that's typically 3-6% for a stabilized property and is a different, lower number) — if the OM only states physical vacancy and gives no economic/pro-forma vacancy figure, return null rather than substituting the physical vacancy rate.
 - assumableLoan = null UNLESS the OM explicitly describes an existing loan the buyer can assume (states an assumable balance, rate, origination date, and/or maturity). If present, fill whichever of rate/balance/origDate/maturity/amYears/ioYears are stated; null for any that aren't.
 - classification: physical-value-add means the NOI growth story depends on a capex/renovation program lifting rents on upgraded units; stabilized-operational means the broker is winning mostly on ancillary income/expense-line assumptions with little or no capex; blended is both.
-- If a CoStar submarket report is among the documents, pull and reason about: (1) new supply / construction pipeline in the submarket, (2) recent population growth, (3) median household income — specifically whether that income level can plausibly support the rent levels this deal's rent premium/growth assumptions imply (a useful sanity check: rent should generally stay under ~30-35% of median household income for the unit sizes involved). Also pull any other data point in the report that materially supports or undermines the investment case (absorption, rent growth trend, submarket vacancy, comparable sale/lease activity). Cite the specific figures found, not generic market color — put this reasoning in marketSupportSummary, and fold the income-supportability conclusion into altusStoryRead too.
+- If a CoStar submarket report is among the documents, extract these as short factual strings citing the actual figures (not generic market color), null if the report doesn't cover that point:
+  - marketSupplyPipeline: new supply / units under construction in the submarket (e.g. "1,240 units under construction, 3.2% of existing inventory").
+  - marketPopGrowth: recent population growth (e.g. "+2.1%/yr, 2020-2024").
+  - marketMedianIncome: median household income (e.g. "$68,400").
+  - marketRentGrowth: recent/forecast rent growth in the submarket.
+  - marketVacancy: submarket vacancy rate.
+  Then in marketSupportSummary, reason from those figures: does the median income plausibly support the rent levels this deal's premium/growth assumptions imply (rent should generally stay under ~30-35% of median household income for the unit sizes involved)? Cite the actual numbers, not a vague conclusion.
 
 DOCUMENTS:
 ${combinedText}`;
 
-    const out = await aiComplete(prompt, { maxTokens: 3000 });
+    // 3000 tokens was too tight for this schema's ~35 fields plus free-text narrative — the
+    // response was very likely getting truncated before finishing, which silently drops
+    // whatever fields the model hadn't emitted yet (explains fields intermittently coming back
+    // missing even when the source document clearly had the data).
+    const out = await aiComplete(prompt, { maxTokens: 6000 });
     const parsed = safeParseJSON(out);
     if (!parsed) throw new Error('Could not parse the Vault documents into structured fields.');
 
     // ---- Build the patch — fill blanks only for raw extracted data, never clobber a figure
     // the analyst already entered by hand (e.g. a negotiated UW price or an already-set field) ----
     const fillIfBlank = ['market', 'vintage', 'units', 'askPrice', 'capex', 'gprAnnual', 'physVacLoss', 'lossToLease',
-      'badDebt', 'concessions', 'otherIncome', 'opexGA', 'opexMaintenance', 'opexPayroll', 'opexMarketing',
+      'badDebt', 'concessions', 'otherIncome', 'marketRentPerUnit', 'opexGA', 'opexMaintenance', 'opexPayroll', 'opexMarketing',
       'opexContractServices', 'opexTaxes', 'opexInsurance', 'opexUtilities', 'opexManagement',
-      'brokerEGI', 'brokerFirm'];
+      'brokerEGI', 'brokerFirm', 'marketSupplyPipeline', 'marketPopGrowth', 'marketMedianIncome',
+      'marketRentGrowth', 'marketVacancy', 'marketSupportSummary'];
     // brokerCapRate/brokerRentPremium/brokerRenovPace are never legitimately 0 in reality — a
     // 0 here almost always means the model defaulted to it instead of returning null when the
     // OM simply didn't state one (e.g. pricing guidance given with no advertised cap rate).
@@ -3469,8 +3486,7 @@ suggestedCapexPerUnit: the $2,000/unit floor if the property looks well-maintain
 
     // The qualitative read regenerates every run — that's the point of clicking the button again.
     patchObj.analystBrokerStory = parsed.brokerStory || d.analystBrokerStory;
-    patchObj.analystStoryRead = (parsed.altusStoryRead || d.analystStoryRead || '') +
-      (parsed.marketSupportSummary ? '\n\nMarket support (CoStar): ' + parsed.marketSupportSummary : '');
+    patchObj.analystStoryRead = parsed.altusStoryRead || d.analystStoryRead;
 
     // ---- Deterministic verdict, using the just-parsed figures merged over the existing deal ----
     const merged = { ...d, ...patchObj };

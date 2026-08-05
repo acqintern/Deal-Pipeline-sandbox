@@ -210,6 +210,14 @@ function AnalystScreenTab({ deal, set }) {
   const econLoss = uw ? uw.econLoss0 : (numA(deal.physVacLoss) + numA(deal.lossToLease) + numA(deal.badDebt) + numA(deal.concessions));
   const otherInc = uw ? uw.otherIncome : numA(deal.otherIncome, 0);
   const egi = uw ? uw.egi0 : (gpr > 0 ? gpr - econLoss + otherInc : numA(deal.trailingEGI, 0));
+
+  // Current vs. market rent, isolated to the loss-to-lease gap only (not vacancy/bad debt/
+  // concessions, which are about occupancy and collections, not rent level).
+  const currentRentPerUnit = gpr > 0 && units > 0 ? (gpr - numA(deal.lossToLease, 0)) / units / 12 : null;
+  const marketRentDefault = gpr > 0 && units > 0 ? gpr / units / 12 : null;
+  const marketRentPerUnit = deal.analystMarketRentPerUnit != null && deal.analystMarketRentPerUnit !== ''
+    ? numA(deal.analystMarketRentPerUnit) : marketRentDefault;
+  const rentGapPerUnit = currentRentPerUnit != null && marketRentPerUnit != null ? marketRentPerUnit - currentRentPerUnit : null;
   const opex = uw ? uw.opexBase : (numA(deal.marketOpexPerUnit, 0) * units || numA(deal.currentOpexTotal, 0));
   const noi = egi - opex;
 
@@ -240,14 +248,6 @@ function AnalystScreenTab({ deal, set }) {
   // Hurdle math
   const priceToClose = altusNOI > 0 ? altusNOI / HURDLE : null; // price needed to hit 6.5%
   const priceDelta = priceToClose && price ? price - priceToClose : null; // positive = overpaying
-
-  // Analyst fields
-  const analystVerdict = deal.analystVerdict || '';
-
-  const inputSty = { border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px',
-    background: 'var(--panel)', fontSize: 13, height: 34, width: '100%',
-    boxSizing: 'border-box', color: 'var(--ink)', fontFamily: 'var(--font)', outline: 'none',
-    cursor: 'pointer' };
 
   const noUWWarning = !hasFullUW && (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px',
@@ -509,14 +509,14 @@ function AnalystScreenTab({ deal, set }) {
             <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <ASLbl>Broker's Business Plan</ASLbl>
-                <ASTextarea value={deal.analystBrokerStory} rows={4}
+                <ASTextarea value={deal.analystBrokerStory} rows={6}
                   placeholder="Summarize what the broker is marketing: value-add scope, rent premium, renovation pace, exit assumption, any stated upside drivers…"
                   onChange={(v) => set('analystBrokerStory', v)} />
               </div>
 
               <div>
                 <ASLbl>Altus Read on the Story</ASLbl>
-                <ASTextarea value={deal.analystStoryRead} rows={4}
+                <ASTextarea value={deal.analystStoryRead} rows={6}
                   placeholder="Is the plan credible for this vintage? What evidence supports or undermines it? What would have to be true for it to work?"
                   onChange={(v) => set('analystStoryRead', v)} />
               </div>
@@ -527,7 +527,7 @@ function AnalystScreenTab({ deal, set }) {
           <ASCard>
             <ASCardHead title="Questions for the Broker" sub="Concise — the big assumptions that move this deal, and why they believe them" />
             <div style={{ padding: '16px 20px' }}>
-              <ASTextarea value={deal.analystBrokerQuestions} rows={5}
+              <ASTextarea value={deal.analystBrokerQuestions} rows={7}
                 placeholder="- Why do you believe the $X/unit renovation premium is achievable at this pace?
 - What supports the new ancillary income program you're advertising?"
                 onChange={(v) => set('analystBrokerQuestions', v)} />
@@ -539,6 +539,27 @@ function AnalystScreenTab({ deal, set }) {
             <ASCardHead title="Altus Value-Add View"
               sub="Analyst's own assumption — feeds the full underwrite" />
             <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px 16px' }}>
+                <div>
+                  <ASLbl>Current Rent</ASLbl>
+                  <div style={{ height: 34, display: 'flex', alignItems: 'center', fontSize: 13.5, color: currentRentPerUnit != null ? 'var(--ink)' : 'var(--faint)' }}>
+                    {currentRentPerUnit != null ? moneyA(currentRentPerUnit) + '/unit/mo' : '—'}
+                  </div>
+                </div>
+                <div>
+                  <ASLbl>Market Rent</ASLbl>
+                  <ASInput value={deal.analystMarketRentPerUnit ?? (marketRentDefault != null ? Math.round(marketRentDefault) : '')}
+                    onChange={(v) => set('analystMarketRentPerUnit', v === '' ? null : Number(v))}
+                    prefix="$" suffix="/unit/mo" placeholder="e.g. 1,450" />
+                </div>
+                <div>
+                  <ASLbl>Rent Gap</ASLbl>
+                  <div className="num" style={{ height: 34, display: 'flex', alignItems: 'center', fontSize: 13.5, fontWeight: 600,
+                    color: rentGapPerUnit == null ? 'var(--faint)' : rentGapPerUnit > 0 ? 'var(--pos)' : 'var(--neg)' }}>
+                    {rentGapPerUnit != null ? (rentGapPerUnit >= 0 ? '+' : '') + moneyA(rentGapPerUnit) + '/mo' : '—'}
+                  </div>
+                </div>
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
                 <div>
                   <ASLbl>Achievable Rent Premium</ASLbl>
@@ -609,57 +630,55 @@ function AnalystScreenTab({ deal, set }) {
 
               <div>
                 <ASLbl>Value-Add Rationale</ASLbl>
-                <ASTextarea value={deal.analystVARationale} rows={3}
+                <ASTextarea value={deal.analystVARationale} rows={5}
                   placeholder="Why is Altus's premium/pace different from broker's? Comparable programs, market evidence, condition notes…"
                   onChange={(v) => set('analystVARationale', v)} />
               </div>
             </div>
           </ASCard>
 
-          {/* Verdict */}
+          {/* CoStar Market Data — parsed from the submarket report in the Vault */}
           <ASCard>
-            <ASCardHead title="Screen Verdict" sub="Analyst recommendation after the screen" />
+            <ASCardHead title="CoStar Market Data" sub="Parsed from the submarket report in the Vault" />
             <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <ASLbl>Recommendation</ASLbl>
-                <select value={analystVerdict}
-                  onChange={(e) => set('analystVerdict', e.target.value)}
-                  style={{ ...inputSty,
-                    color: analystVerdict === 'proceed' ? 'var(--pos)'
-                      : analystVerdict === 'pass' ? 'var(--neg)'
-                      : analystVerdict === 'price' ? 'var(--warn)'
-                      : 'var(--ink)',
-                    fontWeight: analystVerdict ? 600 : 400 }}>
-                  <option value="">— select recommendation —</option>
-                  <option value="proceed">Proceed to Full Underwrite</option>
-                  <option value="price">Proceed — Needs Price Cut First</option>
-                  <option value="watch">Watch — Re-screen at Lower Basis</option>
-                  <option value="pass">Pass</option>
-                </select>
-              </div>
-              <div>
-                <ASLbl>Rationale / Next Steps</ASLbl>
-                <ASTextarea value={deal.analystVerdictNotes} rows={4}
-                  placeholder="State the call plainly: what the gap is, whether a lower offer makes it work, what the analyst should do next. An MD reading this should be able to act on it immediately."
-                  onChange={(v) => set('analystVerdictNotes', v)} />
-              </div>
-
-              {/* Verdict badge */}
-              {analystVerdict && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px',
-                  borderRadius: 8,
-                  background: analystVerdict === 'proceed' ? 'var(--pos-soft)'
-                    : analystVerdict === 'pass' ? 'var(--neg-soft)'
-                    : 'var(--warn-soft)',
-                  border: '1px solid ' + (analystVerdict === 'proceed' ? 'var(--pos)' : analystVerdict === 'pass' ? 'var(--neg)' : 'rgba(184,114,20,.3)') }}>
-                  <Icon name={analystVerdict === 'proceed' ? 'check' : analystVerdict === 'pass' ? 'close' : 'flag'} size={14}
-                    style={{ color: analystVerdict === 'proceed' ? 'var(--pos)' : analystVerdict === 'pass' ? 'var(--neg)' : 'var(--warn)', flex: 'none' }} />
-                  <span style={{ fontSize: 13, fontWeight: 600,
-                    color: analystVerdict === 'proceed' ? 'var(--pos)' : analystVerdict === 'pass' ? 'var(--neg)' : 'var(--warn)' }}>
-                    {{proceed: 'Proceed to Full Underwrite', price: 'Proceed — Needs Price Cut', watch: 'Watch — Re-screen Later', pass: 'Pass'}[analystVerdict]}
-                  </span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
+                <div>
+                  <ASLbl>Supply Pipeline</ASLbl>
+                  <ASTextarea value={deal.marketSupplyPipeline} rows={2}
+                    placeholder="Units under construction, % of existing inventory…"
+                    onChange={(v) => set('marketSupplyPipeline', v)} />
                 </div>
-              )}
+                <div>
+                  <ASLbl>Population Growth</ASLbl>
+                  <ASTextarea value={deal.marketPopGrowth} rows={2}
+                    placeholder="Recent annual population growth…"
+                    onChange={(v) => set('marketPopGrowth', v)} />
+                </div>
+                <div>
+                  <ASLbl>Median Household Income</ASLbl>
+                  <ASTextarea value={deal.marketMedianIncome} rows={2}
+                    placeholder="e.g. $68,400"
+                    onChange={(v) => set('marketMedianIncome', v)} />
+                </div>
+                <div>
+                  <ASLbl>Submarket Rent Growth</ASLbl>
+                  <ASTextarea value={deal.marketRentGrowth} rows={2}
+                    placeholder="Recent / forecast rent growth…"
+                    onChange={(v) => set('marketRentGrowth', v)} />
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <ASLbl>Submarket Vacancy</ASLbl>
+                  <ASTextarea value={deal.marketVacancy} rows={2}
+                    placeholder="Current submarket vacancy rate…"
+                    onChange={(v) => set('marketVacancy', v)} />
+                </div>
+              </div>
+              <div>
+                <ASLbl>Does Income Support Further Rent Growth?</ASLbl>
+                <ASTextarea value={deal.marketSupportSummary} rows={6}
+                  placeholder="Reasoning tying the figures above together — does median income actually support the rent levels this deal's assumptions imply?"
+                  onChange={(v) => set('marketSupportSummary', v)} />
+              </div>
             </div>
           </ASCard>
         </div>
