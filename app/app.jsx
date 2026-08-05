@@ -3174,6 +3174,8 @@ Do not include any text outside the JSON object.`;
   "opexGA": 0, "opexMaintenance": 0, "opexPayroll": 0, "opexMarketing": 0, "opexContractServices": 0,
   "opexTaxes": 0, "opexInsurance": 0, "opexUtilities": 0, "opexManagement": 0, "opexReserves": 0,
   "brokerEGI": 0, "brokerCapRate": 0, "brokerRentPremium": 0, "brokerRenovPace": 0,
+  "brokerAncillaryIncomeMonthly": 0, "brokerStabEconVac": 0,
+  "assumableLoan": { "rate": 0, "balance": 0, "origDate": "YYYY-MM-DD", "maturity": "YYYY-MM-DD", "amYears": 0, "ioYears": 0 },
   "brokerStory": "2-3 sentences: what the broker is marketing and why (value-add scope, rent premium, exit assumption, why now)",
   "altusStoryRead": "2-3 sentences: is the plan credible for this vintage, what would have to be true for it to work",
   "classification": "one of: physical-value-add, stabilized-operational, blended"
@@ -3184,10 +3186,14 @@ Definitions:
 - physVacLoss / lossToLease / badDebt / concessions = each an ANNUAL dollar loss (positive number), from that same income statement, directly below the GPR line.
 - effectiveGrossIncome = the in-place/current (NOT pro forma) Effective Gross Income line, if gprAnnual and the loss lines aren't separately broken out.
 - opex* = ANNUAL dollar total for that expense category from the T-12. Property taxes and insurance are almost always listed separately even when a "total operating expenses" subtotal above them excludes them — extract each individually regardless. opexReserves: a T-12 will almost never show this — if genuinely absent, return null (the caller applies a default), don't return 0.
+- capex = ONLY a forward-looking renovation BUDGET the OM proposes the BUYER execute going forward (e.g. "recommended $8,000/unit interior program"). NEVER a historical figure describing capital the CURRENT owner already spent (e.g. "$3.68M invested since 2020," "recently renovated," "capital improvements completed") — that money is already reflected in the property's current condition and rents, not a cost Altus would incur. If the OM only describes past/completed capex, return null here, not that historical figure.
 - brokerEGI = the broker's PRO FORMA / stabilized "Upgrade Forecast" Effective Gross Income (not the in-place actual) — usually the last, right-most large dollar figure on the Effective Gross Income row.
 - brokerCapRate = the broker's advertised going-in cap rate as a percent number (e.g. 5.25, not 0.0525).
 - brokerRentPremium = the broker's assumed post-renovation rent premium, in $/unit/month.
 - brokerRenovPace = the broker's assumed renovation pace, in units turned per year.
+- brokerAncillaryIncomeMonthly = a NEW ancillary income initiative the broker advertises as upside (e.g. a RUBS utility-billback rollout, a new amenity/package/valet-trash fee program) that is NOT yet reflected in the current T-12's other income — in $/unit/month. Only the incremental NEW program, not existing other income already counted in otherIncome above.
+- brokerStabEconVac = the broker's stated or clearly implied STABILIZED (pro forma / post-lease-up) economic vacancy assumption, as a percent number (e.g. 12, not 0.12) — typically somewhere in the 10-14% range for a value-add deal; null if the OM doesn't address stabilized vacancy at all.
+- assumableLoan = null UNLESS the OM explicitly describes an existing loan the buyer can assume (states an assumable balance, rate, origination date, and/or maturity). If present, fill whichever of rate/balance/origDate/maturity/amYears/ioYears are stated; null for any that aren't.
 - classification: physical-value-add means the NOI growth story depends on a capex/renovation program lifting rents on upgraded units; stabilized-operational means the broker is winning mostly on ancillary income/expense-line assumptions with little or no capex; blended is both.
 
 DOCUMENTS:
@@ -3227,6 +3233,50 @@ ${combinedText}`;
       'opexTaxes', 'opexInsurance', 'opexUtilities', 'opexManagement']
       .reduce((s, k) => s + numOr(patchObj[k] != null ? patchObj[k] : d[k], 0), 0) + numOr(patchObj.opexReserves != null ? patchObj.opexReserves : d.opexReserves, 0);
     if (opexSum > 0) patchObj.currentOpexTotal = opexSum;
+
+    // ---- Stabilized Other Income: current T-12 other income + any NEW ancillary income
+    // program the broker advertises (RUBS rollout, amenity fee, etc.), not yet in the T-12 ----
+    if (d.stabOtherIncome == null || d.stabOtherIncome === '' || d.stabOtherIncome === 0) {
+      const currentOtherIncome = numOr(patchObj.otherIncome != null ? patchObj.otherIncome : d.otherIncome, 0);
+      if (parsed.brokerAncillaryIncomeMonthly != null && units > 0) {
+        patchObj.stabOtherIncome = currentOtherIncome + numOr(parsed.brokerAncillaryIncomeMonthly, 0) * 12 * units;
+      }
+    }
+
+    // ---- Back into an implied ask price when the OM gives a cap rate + in-place NOI but no
+    // stated dollar price (some OMs quote pricing guidance only as "X% cap") ----
+    if ((d.askPrice == null || d.askPrice === '' || d.askPrice === 0) && patchObj.askPrice == null && parsed.brokerCapRate) {
+      const impliedNOI = numOr(patchObj.trailingEGI != null ? patchObj.trailingEGI : d.trailingEGI, 0) - opexSum;
+      if (impliedNOI > 0) patchObj.askPrice = Math.round(impliedNOI / (numOr(parsed.brokerCapRate, 0) / 100));
+    }
+
+    // ---- Stabilized economic vacancy: adopt the broker's stated/implied stabilized assumption
+    // (normally 10-14% for a value-add deal); default to the 12% midpoint if the OM is silent ----
+    if (d.stabEconVac == null || d.stabEconVac === '') {
+      patchObj.stabEconVac = parsed.brokerStabEconVac != null ? parsed.brokerStabEconVac : 12;
+    }
+    const stabEconVacPct = numOr(patchObj.stabEconVac != null ? patchObj.stabEconVac : d.stabEconVac, 12);
+
+    // ---- Acquisition financing: assumable if the OM describes one, else a new HUD-eligible
+    // loan. Scenario follows stabilized economic vacancy — under 12% is stable enough to go
+    // straight to HUD financing at acquisition; 12%+ needs a bridge loan first. Always model a
+    // takeout refinance into HUD (refi.enabled = true) regardless of scenario. ----
+    if (!d.acqFin || !d.acqFin.mode || d.acqFin.mode === 'none') {
+      const scenario = stabEconVacPct < 12 ? 'HUD at Acquisition' : 'Bridge to HUD';
+      const al = parsed.assumableLoan;
+      if (al && (al.rate != null || al.balance != null)) {
+        patchObj.acqFin = { mode: 'assumable', scenario, assumable: {
+          rate: al.rate != null ? al.rate : 5, amYears: al.amYears != null ? al.amYears : 30,
+          ioYears: al.ioYears != null ? al.ioYears : 0, maturity: al.maturity || null,
+          origDate: al.origDate || null, origAmount: al.balance != null ? al.balance : 0,
+        } };
+      } else {
+        patchObj.acqFin = { mode: 'new', scenario, new: { pct: 70, rate: 6.25, basis: 'LTC', amYears: 30, ioYears: 3 } };
+      }
+    }
+    if (!d.refi || !d.refi.enabled) {
+      patchObj.refi = { enabled: true, year: 3, cap: 6, ltv: 80, rate: 6, amYears: 35, ioYears: 0, costPct: 2 };
+    }
 
     // The qualitative read regenerates every run — that's the point of clicking the button again.
     patchObj.analystBrokerStory = parsed.brokerStory || d.analystBrokerStory;

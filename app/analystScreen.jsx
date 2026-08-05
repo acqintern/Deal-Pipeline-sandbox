@@ -107,31 +107,45 @@ const OPEX_LINES = [
   { key: 'opexUtilities', label: 'Utilities', lo: null, hi: null },
 ];
 
+const OPEX_ROW_COLS = '1fr 120px 90px 130px 110px';
+function FlagPill({ flag, title }) {
+  const color = flag === 'high' ? 'var(--neg)' : flag === 'low' ? 'var(--warn)' : flag === 'ok' ? 'var(--pos)' : 'var(--faint)';
+  const bg = flag === 'high' ? 'var(--neg-soft)' : flag === 'low' ? 'var(--warn-soft)' : flag === 'ok' ? 'var(--pos-soft)' : 'var(--panel-2)';
+  const label = flag === 'high' ? 'Above range' : flag === 'low' ? 'Below floor' : flag === 'ok' ? 'In range' : '—';
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center' }}>
+      <span title={title} style={{ fontSize: 10.5, fontWeight: 700, color, background: bg,
+        borderRadius: 999, padding: '3px 9px', whiteSpace: 'nowrap', cursor: title ? 'help' : 'default' }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function OpexBenchRow({ line, deal, set, units }) {
   const raw = deal[line.key];
   const perUnit = raw != null && raw !== '' && units > 0 ? Number(raw) / units : null;
-  let flag = null;
+  let flag = perUnit == null ? null : 'ok';
   if (perUnit != null && line.lo != null) {
     if (perUnit > line.hi) flag = 'high';
     else if (perUnit < (line.floor != null ? line.floor : line.lo)) flag = 'low';
   }
-  const flagColor = flag === 'high' ? 'var(--neg)' : flag === 'low' ? 'var(--warn)' : 'var(--faint)';
-  const flagLabel = flag === 'high' ? 'Above range — check for inefficiency'
-    : flag === 'low' ? (line.floor != null ? 'Below floor — verify, don\'t assume savings' : 'Below range')
-    : (perUnit != null ? 'In range' : '—');
+  const flagTitle = flag === 'high' ? 'Above the Altus benchmark — check for operational inefficiency'
+    : flag === 'low' ? (line.floor != null ? "Below the hard floor — verify, don't assume savings" : 'Below the Altus benchmark range')
+    : null;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 170px 200px',
+    <div style={{ display: 'grid', gridTemplateColumns: OPEX_ROW_COLS,
       padding: '7px 20px', borderBottom: '1px solid var(--line)', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: 12.5, color: 'var(--slate)' }}>{line.label}</span>
       <div><ASInput value={raw ?? ''} prefix="$" onChange={(v) => set(line.key, v === '' ? null : Number(v))} placeholder="from T12" /></div>
-      <span className="num" style={{ fontSize: 12.5, textAlign: 'right', fontWeight: 600,
+      <span className="num" style={{ fontSize: 12.5, textAlign: 'center', fontWeight: 600,
         color: perUnit == null ? 'var(--faint)' : 'var(--ink)' }}>
         {perUnit != null ? moneyA(perUnit) + '/u' : '—'}
       </span>
-      <span style={{ fontSize: 11.5, color: 'var(--muted)', textAlign: 'right' }}>
+      <span style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
         {line.lo != null ? moneyA(line.lo) + '–' + moneyA(line.hi) + '/u' : 'match T12/broker'}
       </span>
-      <span style={{ fontSize: 11, textAlign: 'right', fontWeight: 600, color: flagColor }}>{flagLabel}</span>
+      <FlagPill flag={flag} title={flagTitle} />
     </div>
   );
 }
@@ -139,22 +153,21 @@ function OpexBenchRow({ line, deal, set, units }) {
 function ManagementFeeRow({ deal, set, egi }) {
   const raw = deal.opexManagement;
   const pct = raw != null && raw !== '' && egi > 0 ? Number(raw) / egi * 100 : null;
-  const flag = pct == null ? null : pct < 3 ? 'low' : pct > 3.5 ? 'high' : null;
-  const flagColor = flag === 'high' ? 'var(--neg)' : flag === 'low' ? 'var(--warn)' : 'var(--faint)';
-  const flagLabel = flag === 'high' ? 'Above range — check for inefficiency'
-    : flag === 'low' ? 'Below 3% floor — verify, don\'t assume savings'
-    : (pct != null ? 'In range' : '—');
+  const flag = pct == null ? null : pct < 3 ? 'low' : pct > 3.5 ? 'high' : 'ok';
+  const flagTitle = flag === 'high' ? 'Above the Altus benchmark — check for operational inefficiency'
+    : flag === 'low' ? "Below the 3% floor — verify, don't assume savings"
+    : null;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 170px 200px',
+    <div style={{ display: 'grid', gridTemplateColumns: OPEX_ROW_COLS,
       padding: '7px 20px', borderBottom: '1px solid var(--line)', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: 12.5, color: 'var(--slate)' }}>Management Fee</span>
       <div><ASInput value={raw ?? ''} prefix="$" onChange={(v) => set('opexManagement', v === '' ? null : Number(v))} placeholder="from T12" /></div>
-      <span className="num" style={{ fontSize: 12.5, textAlign: 'right', fontWeight: 600,
+      <span className="num" style={{ fontSize: 12.5, textAlign: 'center', fontWeight: 600,
         color: pct == null ? 'var(--faint)' : 'var(--ink)' }}>
         {pct != null ? pct.toFixed(2) + '%' : '—'}
       </span>
-      <span style={{ fontSize: 11.5, color: 'var(--muted)', textAlign: 'right' }}>3.0%–3.5% of EGI</span>
-      <span style={{ fontSize: 11, textAlign: 'right', fontWeight: 600, color: flagColor }}>{flagLabel}</span>
+      <span style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>3.0–3.5% of EGI</span>
+      <FlagPill flag={flag} title={flagTitle} />
     </div>
   );
 }
@@ -450,13 +463,13 @@ function AnalystScreenTab({ deal, set }) {
           <ASCard>
             <ASCardHead title="Operating Expense Benchmark (Per Unit)"
               sub="Enter each T12 line item — flags anything outside Altus's benchmark range for operational efficiency review" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 170px 200px',
+            <div style={{ display: 'grid', gridTemplateColumns: OPEX_ROW_COLS,
               padding: '8px 20px', borderBottom: '2px solid var(--line)', gap: 8 }}>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>Line Item</span>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>T12 Actual ($/yr)</span>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'right' }}>$/Unit</span>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'right' }}>Altus Benchmark</span>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'right' }}>Flag</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>T12 ($/yr)</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>$/Unit</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Benchmark</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Flag</span>
             </div>
             {OPEX_LINES.map((line) => <OpexBenchRow key={line.key} line={line} deal={deal} set={set} units={units} />)}
             <ManagementFeeRow deal={deal} set={set} egi={egi} />
