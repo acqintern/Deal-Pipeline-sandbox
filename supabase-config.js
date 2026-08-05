@@ -17,7 +17,9 @@ SUPABASE_ANON_KEY: 'sb_publishable_oLIak5cHsVJ9bKbmgaMZPg_hdLHteFg',
 //    functions/api/claude.js (set the ANTHROPIC_API_KEY env var in the Pages
 //    dashboard) — never in the browser. This just points the app at that endpoint.
 window.ALTUS_AI = {
-  complete: async (prompt, maxTokens) => {
+  // images (optional, 3rd arg): [{ mediaType: "image/jpeg", data: "<base64, no data: prefix>" }]
+  // — for vision passes (e.g. assessing property condition from OM photos).
+  complete: async (prompt, maxTokens, images) => {
     // Only fail fast when window.claude exists as a fallback (Design Canvas preview) —
     // there, a fast abort just hands off to the fallback quickly. On a real deployment
     // there is no fallback, so a hard 4s cap here aborted every real document parse
@@ -31,7 +33,7 @@ window.ALTUS_AI = {
       r = await fetch('/api/claude', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
+        body: JSON.stringify({ prompt, ...(maxTokens ? { max_tokens: maxTokens } : {}), ...(images && images.length ? { images } : {}) }),
         signal: controller.signal,
       });
     } finally {

@@ -34,9 +34,10 @@ function loadDeals() {
 // reconfiguration — production uses the hosted endpoint, preview uses claude directly.
 async function aiComplete(prompt, opts) {
   const maxTokens = (opts && opts.maxTokens) || 4096;
+  const images = opts && opts.images;
   const callClaude = () => window.claude.complete(prompt, { maxTokens });
   if (window.ALTUS_AI && typeof window.ALTUS_AI.complete === 'function') {
-    try { return await window.ALTUS_AI.complete(prompt, maxTokens); } catch (e) {
+    try { return await window.ALTUS_AI.complete(prompt, maxTokens, images); } catch (e) {
       if (!(window.claude && typeof window.claude.complete === 'function')) throw e;
       // fall through to window.claude when the hosted endpoint isn't reachable
     }
@@ -1949,6 +1950,32 @@ async function extractFileText(file) {
   return await file.text().catch(() => '');
 }
 
+// Render a sample of PDF pages to base64 JPEGs for a vision pass (e.g. assessing property
+// condition from an OM's own photos — unit interiors, exteriors, amenities). Property photos
+// are almost always early in an OM, so sampling the first `maxPages` is a reasonable, cheap
+// way to catch them without rendering (and paying for) the entire document.
+async function renderPdfPagesToImages(file, maxPages = 8) {
+  if (!window.pdfjsLib) return [];
+  try {
+    const pdf = await window.pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const n = Math.min(pdf.numPages, maxPages);
+    const images = [];
+    for (let i = 1; i <= n; i++) {
+      try {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 1.0 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+        const data = dataUrl.split(',')[1];
+        if (data) images.push({ mediaType: 'image/jpeg', data });
+      } catch (e) { /* skip an unrenderable page, keep going */ }
+    }
+    return images;
+  } catch (e) { return []; }
+}
+
 // Build a focused excerpt around financial keywords so a big OM's pro-forma page
 // is always included even when the doc far exceeds the model budget.
 // `keywords` is ordered by priority (most specific first); windows created by
@@ -3159,15 +3186,19 @@ Do not include any text outside the JSON object.`;
     if (!cloud || !cloud.signedDocUrl) throw new Error('Cloud storage isn’t connected, so Vault documents can’t be read here.');
 
     // ---- Pull every vault document's text, grouped by category ----
+    // OM files are also kept (not just their extracted text) so a vision pass over the
+    // property's own photos can inform the capex assumption further down, when needed.
     const byCat = {};
+    const omFiles = [];
     for (const doc of docs) {
       try {
         const url = await cloud.signedDocUrl(doc.path, 3600);
         const blob = await (await fetch(url)).blob();
         const file = new File([blob], doc.name, { type: blob.type });
         const text = await extractFileText(file);
-        if (!text || !text.trim()) continue;
         const cat = doc.category || 'Other';
+        if (cat === 'OM' && /pdf/.test(file.type || '')) omFiles.push(file);
+        if (!text || !text.trim()) continue;
         (byCat[cat] = byCat[cat] || []).push({ name: doc.name, text });
       } catch (e) { /* one unreadable document shouldn't sink the whole screen */ }
     }
@@ -3184,10 +3215,18 @@ Do not include any text outside the JSON object.`;
       'insurance', 'utilities', 'water', 'sewer', 'electric', 'gas expense',
       'replacement reserves', 'pro forma', 'upgrade forecast',
       'asking price', 'purchase price', 'units', 'year built', 'built in', 'construction',
-      'capital improvements', 'exclusively listed', 'investment sales', 'brokerage'];
+      'capital improvements', 'exclusively listed', 'investment sales', 'brokerage',
+      'supply pipeline', 'under construction', 'deliveries', 'population growth',
+      'median household income', 'median income', 'absorption', 'submarket', 'rent growth'];
+    // For OM documents, always include the literal first ~3000 characters (cover page /
+    // property overview) regardless of keyword matches — vintage, market, and broker firm
+    // routinely sit in a summary box there with no nearby keyword hit for focusExcerpt to
+    // anchor on, which was causing them to be dropped from the excerpt entirely.
     const financialText = catNames.map((cat) =>
-      `=== ${cat} DOCUMENT(S) ===\n` + byCat[cat].map((f) =>
-        `--- ${f.name} ---\n${focusExcerpt(f.text, FOCUS_KEYWORDS, 18000)}`).join('\n\n')
+      `=== ${cat} DOCUMENT(S) ===\n` + byCat[cat].map((f) => {
+        const cover = cat === 'OM' ? `[COVER PAGE / PROPERTY OVERVIEW — always included]\n${f.text.slice(0, 3000)}\n\n[FINANCIAL EXCERPT]\n` : '';
+        return `--- ${f.name} ---\n${cover}${focusExcerpt(f.text, FOCUS_KEYWORDS, 18000)}`;
+      }).join('\n\n')
     ).join('\n\n');
     // Broker contacts sit on a different part of the OM (cover page / final contact pages) than
     // the financial tables above — guarantee those pages are included the same way runOMParse does.
@@ -3209,7 +3248,8 @@ Do not include any text outside the JSON object.`;
   "brokerAncillaryIncomeMonthly": null, "brokerStabEconVac": null,
   "assumableLoan": { "rate": null, "balance": null, "origDate": null, "maturity": null, "amYears": null, "ioYears": null },
   "brokerStory": "2-3 sentences: what the broker is marketing and why (value-add scope, rent premium, exit assumption, why now)",
-  "altusStoryRead": "2-3 sentences: is the plan credible for this vintage, what would have to be true for it to work",
+  "altusStoryRead": "2-4 sentences: is the plan credible for this vintage, what would have to be true for it to work, and — if a CoStar submarket report is provided — whether area income actually supports the assumed rent growth",
+  "marketSupportSummary": "if a CoStar/submarket report is provided: 1-2 sentences citing the specific supply pipeline, population growth, and median income figures found, plus any other data point from the report that supports or undermines the investment case. null if no CoStar report is provided.",
   "classification": "one of: physical-value-add, stabilized-operational, blended"
 }
 
@@ -3232,6 +3272,7 @@ Definitions:
   - opexUtilities: "Utilities", "Utility Expenses" — electricity, gas, water/sewer (the EXPENSE side, not RUBS income), trash removal if billed as a utility rather than a contract.
   - opexManagement: "Management Fee", "Management Fees" — typically shown as a % of EGI on the T-12 already; if only a % is shown, multiply by effectiveGrossIncome to get the annual dollar figure.
   Property taxes and insurance are almost always listed separately even when a "total operating expenses" subtotal above them excludes them — extract each individually regardless of that subtotal. opexReserves: a T-12 will almost never show this — if genuinely absent, return null (the caller applies a default), don't return 0.
+  CRITICAL: every opex* figure must come from the T-12's ACTUAL / historical column — never the broker's pro forma, budgeted, or "Year 1 Forecast" expense column. Some T-12s and OMs show BOTH an "Actual" and a "Budget" (or "Pro Forma") column side by side for each expense line — always pick Actual. If you can't tell which column is actual, prefer the column explicitly labeled with a past year or "T-12"/"Trailing" over one labeled "Budget," "Forecast," or "Pro Forma."
 - capex = ONLY a forward-looking renovation BUDGET the OM proposes the BUYER execute going forward (e.g. "recommended $8,000/unit interior program"). NEVER a historical figure describing capital the CURRENT owner already spent (e.g. "$3.68M invested since 2020," "recently renovated," "capital improvements completed") — that money is already reflected in the property's current condition and rents, not a cost Altus would incur. If the OM only describes past/completed capex, return null here, not that historical figure.
 - brokerEGI = the broker's PRO FORMA / stabilized "Upgrade Forecast" Effective Gross Income (not the in-place actual) — usually the last, right-most large dollar figure on the Effective Gross Income row.
 - brokerCapRate = the broker's advertised going-in cap rate as a percent number (e.g. 5.25, not 0.0525). It is VERY common for an OM to state pricing guidance with no cap rate at all — if so, return null. A real cap rate is never 0; never return 0 here.
@@ -3241,6 +3282,7 @@ Definitions:
 - brokerStabEconVac = the broker's stated or clearly implied STABILIZED (pro forma / post-lease-up) ECONOMIC vacancy assumption, as a percent number (e.g. 12, not 0.12) — typically somewhere in the 10-14% range for a value-add deal. Economic vacancy is NOT the same as physical vacancy: economic vacancy = (physical vacancy loss + loss to lease + concessions + bad debt) ÷ Gross Potential Rent, so it is always equal to or higher than the physical (unit-count) vacancy rate. Do NOT return the physical/unit vacancy percentage here (that's typically 3-6% for a stabilized property and is a different, lower number) — if the OM only states physical vacancy and gives no economic/pro-forma vacancy figure, return null rather than substituting the physical vacancy rate.
 - assumableLoan = null UNLESS the OM explicitly describes an existing loan the buyer can assume (states an assumable balance, rate, origination date, and/or maturity). If present, fill whichever of rate/balance/origDate/maturity/amYears/ioYears are stated; null for any that aren't.
 - classification: physical-value-add means the NOI growth story depends on a capex/renovation program lifting rents on upgraded units; stabilized-operational means the broker is winning mostly on ancillary income/expense-line assumptions with little or no capex; blended is both.
+- If a CoStar submarket report is among the documents, pull and reason about: (1) new supply / construction pipeline in the submarket, (2) recent population growth, (3) median household income — specifically whether that income level can plausibly support the rent levels this deal's rent premium/growth assumptions imply (a useful sanity check: rent should generally stay under ~30-35% of median household income for the unit sizes involved). Also pull any other data point in the report that materially supports or undermines the investment case (absorption, rent growth trend, submarket vacancy, comparable sale/lease activity). Cite the specific figures found, not generic market color — put this reasoning in marketSupportSummary, and fold the income-supportability conclusion into altusStoryRead too.
 
 DOCUMENTS:
 ${combinedText}`;
@@ -3327,6 +3369,12 @@ ${combinedText}`;
       'opexTaxes', 'opexInsurance', 'opexUtilities', 'opexManagement']
       .reduce((s, k) => s + numOr(patchObj[k] != null ? patchObj[k] : d[k], 0), 0) + numOr(patchObj.opexReserves != null ? patchObj.opexReserves : d.opexReserves, 0);
     if (opexSum > 0) patchObj.currentOpexTotal = opexSum;
+    // "Our assumption" opex/unit (marketOpexPerUnit) drives the going-in NOI build in
+    // computeMetrics/computeUW — start it at the current actual per unit if blank; the analyst
+    // adjusts it from there once they've formed their own view.
+    if ((d.marketOpexPerUnit == null || d.marketOpexPerUnit === '' || d.marketOpexPerUnit === 0) && opexSum > 0 && units > 0) {
+      patchObj.marketOpexPerUnit = Math.round(opexSum / units);
+    }
 
     // ---- Stabilized Other Income: current T-12 other income + any NEW ancillary income
     // program the broker advertises (RUBS rollout, amenity fee, etc.), not yet in the T-12 ----
@@ -3342,6 +3390,48 @@ ${combinedText}`;
     if ((d.askPrice == null || d.askPrice === '' || d.askPrice === 0) && patchObj.askPrice == null && parsed.brokerCapRate) {
       const impliedNOI = numOr(patchObj.trailingEGI != null ? patchObj.trailingEGI : d.trailingEGI, 0) - opexSum;
       if (impliedNOI > 0) patchObj.askPrice = Math.round(impliedNOI / (numOr(parsed.brokerCapRate, 0) / 100));
+    }
+
+    // ---- UW Price (purchasePrice): default to Ask Price as a starting point when blank — the
+    // analyst adjusts down from there once they've decided how much to bid below ask. ----
+    if (d.purchasePrice == null || d.purchasePrice === '' || d.purchasePrice === 0) {
+      const askForUW = patchObj.askPrice != null ? patchObj.askPrice : d.askPrice;
+      if (askForUW) patchObj.purchasePrice = askForUW;
+    }
+
+    // ---- Capex budget: use the broker's stated program if there is one (already handled via
+    // fillIfBlank above); otherwise default to $2,000/unit. A vision pass over the OM's own
+    // photos (below) can raise this default if the property visibly needs more than a light
+    // program, but never lowers it below the $2,000/unit floor. ----
+    if ((d.capex == null || d.capex === '' || d.capex === 0) && patchObj.capex == null && units > 0) {
+      patchObj.capex = 2000 * units;
+
+      // Vision pass over the OM's own photos — the broker didn't state a renovation budget, so
+      // check whether the property visibly needs more than the $2,000/unit floor (dated finishes,
+      // deferred maintenance, worn common areas). Only ever raises the default, never lowers it.
+      if (omFiles.length) {
+        try {
+          const images = (await Promise.all(omFiles.map((f) => renderPdfPagesToImages(f, 8)))).flat().slice(0, 12);
+          if (images.length) {
+            const visionPrompt = `You are an Altus Equity acquisitions analyst assessing a multifamily property's physical condition from photos in its Offering Memorandum. The broker did not state a renovation budget, so Altus defaults to $2,000/unit unless these photos show the property visibly needs more.
+
+Look at unit interiors, exteriors, common areas, and amenities. Return ONLY valid JSON, no markdown:
+{
+  "conditionSummary": "1-2 sentences on what the photos show (finishes, apparent age/wear, deferred maintenance signs, amenity condition)",
+  "suggestedCapexPerUnit": 2000
+}
+suggestedCapexPerUnit: the $2,000/unit floor if the property looks well-maintained/updated; a higher figure (use your judgment, typically $3,000-$10,000/unit) if photos show dated finishes, visible wear, or deferred maintenance that would need addressing. Never return less than 2000.`;
+            const visionOut = await aiComplete(visionPrompt, { maxTokens: 500, images });
+            const visionParsed = safeParseJSON(visionOut);
+            if (visionParsed && visionParsed.suggestedCapexPerUnit > 2000) {
+              patchObj.capex = Math.round(visionParsed.suggestedCapexPerUnit) * units;
+              patchObj.analystVARationale = (d.analystVARationale || '') +
+                (d.analystVARationale ? '\n\n' : '') +
+                `Capex assumption ($${Math.round(visionParsed.suggestedCapexPerUnit).toLocaleString()}/unit, no broker-stated budget): ${visionParsed.conditionSummary || ''}`;
+            }
+          }
+        } catch (e) { /* vision pass is a refinement on top of the $2,000/unit default — never fail the screen over it */ }
+      }
     }
 
     // ---- Stabilized economic vacancy: adopt the broker's stated/implied stabilized assumption
@@ -3379,7 +3469,8 @@ ${combinedText}`;
 
     // The qualitative read regenerates every run — that's the point of clicking the button again.
     patchObj.analystBrokerStory = parsed.brokerStory || d.analystBrokerStory;
-    patchObj.analystStoryRead = parsed.altusStoryRead || d.analystStoryRead;
+    patchObj.analystStoryRead = (parsed.altusStoryRead || d.analystStoryRead || '') +
+      (parsed.marketSupportSummary ? '\n\nMarket support (CoStar): ' + parsed.marketSupportSummary : '');
 
     // ---- Deterministic verdict, using the just-parsed figures merged over the existing deal ----
     const merged = { ...d, ...patchObj };

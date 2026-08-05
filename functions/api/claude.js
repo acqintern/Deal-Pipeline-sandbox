@@ -1,6 +1,8 @@
 // functions/api/claude.js — Cloudflare Pages Function.
 // Proxies the browser's parse request to the Anthropic API so the API key stays
-// server-side. Route: POST /api/claude  body: { prompt }  ->  { text }
+// server-side. Route: POST /api/claude  body: { prompt, images? }  ->  { text }
+// images (optional): [{ mediaType: "image/jpeg", data: "<base64, no data: prefix>" }, ...]
+// — used for vision passes (e.g. assessing property condition from OM photos).
 //
 // SET THE KEY: Cloudflare dashboard → your Pages project → Settings → Environment
 // variables → add  ANTHROPIC_API_KEY = sk-ant-...  (Production + Preview).
@@ -18,7 +20,18 @@ const MODEL_CANDIDATES = [
   'claude-3-5-sonnet-latest',
 ];
 
-async function callAnthropic(key, model, prompt, maxTokens) {
+function buildContent(prompt, images) {
+  if (!Array.isArray(images) || !images.length) return prompt;
+  // Images first, then the text prompt — the order Anthropic recommends for
+  // grounding the text instructions in the images that precede it.
+  const blocks = images
+    .filter((im) => im && im.data)
+    .map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mediaType || 'image/jpeg', data: im.data } }));
+  blocks.push({ type: 'text', text: prompt });
+  return blocks;
+}
+
+async function callAnthropic(key, model, prompt, maxTokens, images) {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -29,7 +42,7 @@ async function callAnthropic(key, model, prompt, maxTokens) {
     body: JSON.stringify({
       model,
       max_tokens: maxTokens || 4096,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: buildContent(prompt, images) }],
     }),
   });
   const data = await resp.json().catch(() => ({}));
@@ -45,15 +58,19 @@ export async function onRequestPost(context) {
     return json({ error: 'Server is missing ANTHROPIC_API_KEY. Add it in Cloudflare Pages → Settings → Environment variables, then redeploy.' }, 500);
   }
 
-  let prompt = '', maxTokens = 4096;
-  try { const body = await request.json(); prompt = body.prompt; maxTokens = Math.min(body.max_tokens || 4096, 16384); } catch (e) { return json({ error: 'Bad request body' }, 400); }
+  let prompt = '', maxTokens = 4096, images = null;
+  try {
+    const body = await request.json();
+    prompt = body.prompt; maxTokens = Math.min(body.max_tokens || 4096, 16384);
+    images = Array.isArray(body.images) ? body.images.slice(0, 12) : null; // cap — vision cost/latency guardrail
+  } catch (e) { return json({ error: 'Bad request body' }, 400); }
   if (!prompt || typeof prompt !== 'string') return json({ error: 'Missing prompt' }, 400);
 
   const candidates = [env.ANTHROPIC_MODEL, ...MODEL_CANDIDATES].filter(Boolean);
   let lastErr = 'No model could be reached.';
   try {
     for (const model of candidates) {
-      const { resp, data } = await callAnthropic(env.ANTHROPIC_API_KEY, model, prompt, maxTokens);
+      const { resp, data } = await callAnthropic(env.ANTHROPIC_API_KEY, model, prompt, maxTokens, images);
       if (resp.ok) {
         const text = (data.content && data.content[0] && data.content[0].text) || '';
         return json({ text, model });
