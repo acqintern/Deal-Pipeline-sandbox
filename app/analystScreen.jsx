@@ -94,6 +94,71 @@ function BuildRow({ label, altus, broker, delta, isNOI, indent, faint, positive 
   );
 }
 
+/* ── Operating expense per-unit benchmark (opex_benchmarks.md ranges) ── */
+const OPEX_LINES = [
+  { key: 'opexGA', label: 'General & Admin', lo: 200, hi: 350 },
+  { key: 'opexMaintenance', label: 'Maintenance & Repairs', lo: 600, hi: 900 },
+  { key: 'opexPayroll', label: 'Payroll', lo: 1250, hi: 1850, floor: 1250 },
+  { key: 'opexMarketing', label: 'Marketing', lo: 100, hi: 350 },
+  { key: 'opexContractServices', label: 'Contract Services', lo: 250, hi: 500 },
+  { key: 'opexInsurance', label: 'Insurance', lo: 700, hi: 1200 },
+  { key: 'opexReserves', label: 'Replacement Reserves', lo: 250, hi: 400 },
+  { key: 'opexTaxes', label: 'Property Taxes', lo: null, hi: null },
+  { key: 'opexUtilities', label: 'Utilities', lo: null, hi: null },
+];
+
+function OpexBenchRow({ line, deal, set, units }) {
+  const raw = deal[line.key];
+  const perUnit = raw != null && raw !== '' && units > 0 ? Number(raw) / units : null;
+  let flag = null;
+  if (perUnit != null && line.lo != null) {
+    if (perUnit > line.hi) flag = 'high';
+    else if (perUnit < (line.floor != null ? line.floor : line.lo)) flag = 'low';
+  }
+  const flagColor = flag === 'high' ? 'var(--neg)' : flag === 'low' ? 'var(--warn)' : 'var(--faint)';
+  const flagLabel = flag === 'high' ? 'Above range — check for inefficiency'
+    : flag === 'low' ? (line.floor != null ? 'Below floor — verify, don\'t assume savings' : 'Below range')
+    : (perUnit != null ? 'In range' : '—');
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 170px 200px',
+      padding: '7px 20px', borderBottom: '1px solid var(--line)', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--slate)' }}>{line.label}</span>
+      <div><ASInput value={raw ?? ''} prefix="$" onChange={(v) => set(line.key, v === '' ? null : Number(v))} placeholder="from T12" /></div>
+      <span className="num" style={{ fontSize: 12.5, textAlign: 'right', fontWeight: 600,
+        color: perUnit == null ? 'var(--faint)' : 'var(--ink)' }}>
+        {perUnit != null ? moneyA(perUnit) + '/u' : '—'}
+      </span>
+      <span style={{ fontSize: 11.5, color: 'var(--muted)', textAlign: 'right' }}>
+        {line.lo != null ? moneyA(line.lo) + '–' + moneyA(line.hi) + '/u' : 'match T12/broker'}
+      </span>
+      <span style={{ fontSize: 11, textAlign: 'right', fontWeight: 600, color: flagColor }}>{flagLabel}</span>
+    </div>
+  );
+}
+
+function ManagementFeeRow({ deal, set, egi }) {
+  const raw = deal.opexManagement;
+  const pct = raw != null && raw !== '' && egi > 0 ? Number(raw) / egi * 100 : null;
+  const flag = pct == null ? null : pct < 3 ? 'low' : pct > 3.5 ? 'high' : null;
+  const flagColor = flag === 'high' ? 'var(--neg)' : flag === 'low' ? 'var(--warn)' : 'var(--faint)';
+  const flagLabel = flag === 'high' ? 'Above range — check for inefficiency'
+    : flag === 'low' ? 'Below 3% floor — verify, don\'t assume savings'
+    : (pct != null ? 'In range' : '—');
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 170px 200px',
+      padding: '7px 20px', borderBottom: '1px solid var(--line)', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--slate)' }}>Management Fee</span>
+      <div><ASInput value={raw ?? ''} prefix="$" onChange={(v) => set('opexManagement', v === '' ? null : Number(v))} placeholder="from T12" /></div>
+      <span className="num" style={{ fontSize: 12.5, textAlign: 'right', fontWeight: 600,
+        color: pct == null ? 'var(--faint)' : 'var(--ink)' }}>
+        {pct != null ? pct.toFixed(2) + '%' : '—'}
+      </span>
+      <span style={{ fontSize: 11.5, color: 'var(--muted)', textAlign: 'right' }}>3.0%–3.5% of EGI</span>
+      <span style={{ fontSize: 11, textAlign: 'right', fontWeight: 600, color: flagColor }}>{flagLabel}</span>
+    </div>
+  );
+}
+
 /* ── Main tab ── */
 function AnalystScreenTab({ deal, set }) {
   const units = numA(deal.units, 1);
@@ -410,6 +475,22 @@ function AnalystScreenTab({ deal, set }) {
                 </div>
               )}
             </div>
+          </ASCard>
+
+          {/* Operating expense per-unit benchmark — analysis only, does not feed the NOI build above */}
+          <ASCard>
+            <ASCardHead title="Operating Expense Benchmark (Per Unit)"
+              sub="Enter each T12 line item — flags anything outside Altus's benchmark range for operational efficiency review" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 170px 200px',
+              padding: '8px 20px', borderBottom: '2px solid var(--line)', gap: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>Line Item</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>T12 Actual ($/yr)</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'right' }}>$/Unit</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'right' }}>Altus Benchmark</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'right' }}>Flag</span>
+            </div>
+            {OPEX_LINES.map((line) => <OpexBenchRow key={line.key} line={line} deal={deal} set={set} units={units} />)}
+            <ManagementFeeRow deal={deal} set={set} egi={egi} />
           </ASCard>
         </div>
 
