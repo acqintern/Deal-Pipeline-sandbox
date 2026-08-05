@@ -3147,9 +3147,18 @@ Do not include any text outside the JSON object.`;
     const spreadPass = yieldOnCostSpreadBps != null && yieldOnCostSpreadBps >= 100;
 
     const econVacPct = uw ? uw.inPlaceEconVac * 100 : null;
-    const highVacancy = econVacPct != null && econVacPct > 20;
     const avgCoC = uw ? uw.avgYield : null;
     const dealIRR = uw ? uw.irr : null;
+
+    // Risk-adjusted return hurdle (sliding scale) — mirrors the analyst-screen/multifamily-uw
+    // skill's rule: a lower going-in cap rate carries more risk (heavier vacancy/lease-up
+    // dependence) and needs a materially higher IRR to compensate; a higher, more-stabilized
+    // going-in cap rate needs less. Anchor points from Acquisitions leadership: 4.0%→22%,
+    // 5.0%→20%, 7.0%+→15% (floor). Deliberately a simple first-pass ratio, not a fitted model.
+    const requiredIRRPct = goingInCapPct >= 7 ? 15
+      : goingInCapPct >= 5 ? 20 - 2.5 * (goingInCapPct - 5)
+      : 22 - 2 * (goingInCapPct - 4);
+    const irrPass = dealIRR == null ? null : (dealIRR * 100) >= requiredIRRPct;
 
     const ctx = [
       'Property: ' + (d.name || '') + (d.market ? ' — ' + d.market : ''),
@@ -3164,6 +3173,7 @@ Do not include any text outside the JSON object.`;
       econVacPct != null ? 'In-place economic vacancy: ' + econVacPct.toFixed(1) + '%' : '',
       avgCoC != null ? 'Average cash-on-cash across the hold: ' + (avgCoC * 100).toFixed(1) + '%' : '',
       dealIRR != null ? 'Full-hold levered IRR: ' + (dealIRR * 100).toFixed(1) + '%' : '',
+      'Required IRR at this going-in cap rate (risk-adjusted sliding scale): ' + requiredIRRPct.toFixed(1) + '%',
       d.notes ? 'Existing analyst notes: ' + String(d.notes).slice(0, 600) : '',
     ].filter(Boolean).join('\n');
 
@@ -3185,31 +3195,32 @@ Do not include any text outside the JSON object.`;
     if (!parsed || !parsed.classification) throw new Error('Could not parse the screener response.');
 
     // ---- Verdict logic (deterministic) ----
+    // Every path below that could land on GB Review also has to clear the risk-adjusted IRR bar
+    // (irrPass) — a lower going-in cap rate demands a higher IRR, so this replaces the old
+    // vacancy-specific override with the same general rule the analyst-screen/multifamily-uw
+    // skill now uses. irrPass === null means IRR isn't computable yet (no UW inputs) — that's
+    // flagged, not treated as a fail.
+    const irrNote = (passedVerb) => irrPass === false
+      ? ` However, the Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) is below the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar this going-in cap rate requires.`
+      : irrPass == null
+      ? ` IRR wasn't available to check against the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar this going-in cap rate requires — confirm that once UW inputs are entered.`
+      : ` The Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) also clears the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar this going-in cap rate requires.`;
+
     let verdict, verdictReason;
     if (!hurdlePass) {
       verdict = "GB Don't Review";
       verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% is below the 6.5% hurdle.`;
     } else if (parsed.classification === 'stabilized-operational') {
-      verdict = 'GB Review';
-      verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle; little/no capex basis so the yield-on-cost spread isn't the deciding gate here.`;
+      verdict = irrPass === false ? "GB Don't Review" : 'GB Review';
+      verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle; little/no capex basis so the yield-on-cost spread isn't the deciding gate here.` + irrNote();
     } else if (spreadPass) {
-      verdict = 'GB Review';
-      verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle and the yield-on-cost spread (${yieldOnCostSpreadBps} bps) clears the 100 bps gate.`;
+      verdict = irrPass === false ? "GB Don't Review" : 'GB Review';
+      verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle and the yield-on-cost spread (${yieldOnCostSpreadBps} bps) clears the 100 bps gate.` + irrNote();
     } else {
       verdict = "GB Don't Review";
       verdictReason = yieldOnCostSpreadBps == null
         ? "Going-in cap rate clears the hurdle, but Year-3 stabilized NOI isn't available to test the yield-on-cost spread — enter a hold period ≥3 years and stabilized assumptions to complete the screen."
         : `Going-in cap rate clears the hurdle, but the yield-on-cost spread (${yieldOnCostSpreadBps} bps) is below the 100 bps gate — the capital program isn't earning its keep even though the in-place basis is fine.`;
-    }
-    // High-vacancy override — only tightens an already-passing verdict
-    if (verdict === 'GB Review' && highVacancy) {
-      if (dealIRR != null && dealIRR * 100 > 20) {
-        verdictReason += ` In-place economic vacancy is elevated (${econVacPct.toFixed(1)}%), but the full-hold IRR of ${(dealIRR * 100).toFixed(1)}% clears the 20% bar this requires.`;
-      } else {
-        verdict = "GB Don't Review";
-        verdictReason = `In-place economic vacancy is elevated (${econVacPct.toFixed(1)}%), which requires IRR above 20% to proceed — ` +
-          (dealIRR != null ? `current IRR is only ${(dealIRR * 100).toFixed(1)}%.` : "IRR isn't available to confirm it clears that bar.");
-      }
     }
 
     const stamp = window.ALTUS_TODAY || new Date().toISOString().slice(0, 10);
