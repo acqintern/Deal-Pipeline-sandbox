@@ -3124,113 +3124,164 @@ Do not include any text outside the JSON object.`;
     return parsed;
   };
 
-  // ── Analyst Screener ── Altus's going-in cap rate, yield-on-cost spread, and the
-  // 6.5% hurdle are all deterministic arithmetic already available from computeMetrics/
-  // computeUW — computed here in JS so the verdict is auditable, not left for the model
-  // to (mis)calculate. Claude's only job is the qualitative read: reconstruct the broker's
-  // story and classify the deal so the right gate applies.
+  // ── Analyst Screener ── pulls every document out of the deal's Vault, extracts text from
+  // each, and runs ONE extraction+classification pass that populates the Pricing/Income/OpEx
+  // fields plus the Analyst Screener tab's own fields (never the free-text Notes box — that's
+  // a deliberate change; see analystVerdict/analystVerdictNotes below). Going-in cap rate,
+  // yield-on-cost spread, and the risk-adjusted IRR hurdle stay deterministic arithmetic off
+  // computeMetrics/computeUW — never left for the model to (mis)calculate.
   const runAnalystScreener = async (dealId) => {
+    const numOr = (v, dflt) => (v == null || v === '' || isNaN(Number(v)) ? dflt : Number(v));
     const d = (dealsRef.current || deals).find((x) => x.id === dealId);
     if (!d) return null;
-    const m = window.computeMetrics ? window.computeMetrics(d) : { goingInCap: 0, totalBasis: 0 };
-    const uw = window.hasUWInputs && window.hasUWInputs(d) && window.computeUW ? window.computeUW(d) : null;
+    const docs = Array.isArray(d.documents) ? d.documents : [];
+    if (!docs.length) throw new Error('No documents in the Vault — upload the OM/T-12/rent roll on the Summary tab first.');
+    const cloud = window.AltusCloud;
+    if (!cloud || !cloud.signedDocUrl) throw new Error('Cloud storage isn’t connected, so Vault documents can’t be read here.');
 
+    // ---- Pull every vault document's text, grouped by category ----
+    const byCat = {};
+    for (const doc of docs) {
+      try {
+        const url = await cloud.signedDocUrl(doc.path, 3600);
+        const blob = await (await fetch(url)).blob();
+        const file = new File([blob], doc.name, { type: blob.type });
+        const text = await extractFileText(file);
+        if (!text || !text.trim()) continue;
+        const cat = doc.category || 'Other';
+        (byCat[cat] = byCat[cat] || []).push({ name: doc.name, text });
+      } catch (e) { /* one unreadable document shouldn't sink the whole screen */ }
+    }
+    const catNames = Object.keys(byCat);
+    if (!catNames.length) throw new Error('Could not read any document in the Vault — try re-uploading.');
+
+    const FOCUS_KEYWORDS = ['gross potential rent', 'gross scheduled income', 'effective gross income',
+      'physical vacancy', 'loss to lease', 'concessions', 'bad debt', 'other income',
+      'total operating expenses', 'general and administrative', 'repairs and maintenance',
+      'payroll', 'management fee', 'marketing', 'contract services', 'property taxes',
+      'insurance', 'utilities', 'replacement reserves', 'pro forma', 'upgrade forecast',
+      'asking price', 'purchase price', 'units', 'year built', 'capital improvements'];
+    const combinedText = catNames.map((cat) =>
+      `=== ${cat} DOCUMENT(S) ===\n` + byCat[cat].map((f) =>
+        `--- ${f.name} ---\n${focusExcerpt(f.text, FOCUS_KEYWORDS, 18000)}`).join('\n\n')
+    ).join('\n\n');
+
+    const prompt = `You are an Altus Equity acquisitions analyst extracting every figure needed to populate a multifamily deal record, from whatever OM / T-12 / rent roll / CoStar documents are provided below. Return ONLY valid JSON (no markdown, no commentary). Use null for anything not found or not stated anywhere — never guess or fabricate a number.
+
+{
+  "units": 0, "vintage": "year(s) built as a string", "askPrice": 0, "capex": 0,
+  "gprAnnual": 0, "physVacLoss": 0, "lossToLease": 0, "badDebt": 0, "concessions": 0, "otherIncome": 0, "effectiveGrossIncome": 0,
+  "opexGA": 0, "opexMaintenance": 0, "opexPayroll": 0, "opexMarketing": 0, "opexContractServices": 0,
+  "opexTaxes": 0, "opexInsurance": 0, "opexUtilities": 0, "opexManagement": 0, "opexReserves": 0,
+  "brokerEGI": 0, "brokerCapRate": 0, "brokerRentPremium": 0, "brokerRenovPace": 0,
+  "brokerStory": "2-3 sentences: what the broker is marketing and why (value-add scope, rent premium, exit assumption, why now)",
+  "altusStoryRead": "2-3 sentences: is the plan credible for this vintage, what would have to be true for it to work",
+  "classification": "one of: physical-value-add, stabilized-operational, blended"
+}
+
+Definitions:
+- gprAnnual = Gross Potential Rent, the TOP LINE of the T-12/OM income statement, annualized.
+- physVacLoss / lossToLease / badDebt / concessions = each an ANNUAL dollar loss (positive number), from that same income statement, directly below the GPR line.
+- effectiveGrossIncome = the in-place/current (NOT pro forma) Effective Gross Income line, if gprAnnual and the loss lines aren't separately broken out.
+- opex* = ANNUAL dollar total for that expense category from the T-12. Property taxes and insurance are almost always listed separately even when a "total operating expenses" subtotal above them excludes them — extract each individually regardless. opexReserves: a T-12 will almost never show this — if genuinely absent, return null (the caller applies a default), don't return 0.
+- brokerEGI = the broker's PRO FORMA / stabilized "Upgrade Forecast" Effective Gross Income (not the in-place actual) — usually the last, right-most large dollar figure on the Effective Gross Income row.
+- brokerCapRate = the broker's advertised going-in cap rate as a percent number (e.g. 5.25, not 0.0525).
+- brokerRentPremium = the broker's assumed post-renovation rent premium, in $/unit/month.
+- brokerRenovPace = the broker's assumed renovation pace, in units turned per year.
+- classification: physical-value-add means the NOI growth story depends on a capex/renovation program lifting rents on upgraded units; stabilized-operational means the broker is winning mostly on ancillary income/expense-line assumptions with little or no capex; blended is both.
+
+DOCUMENTS:
+${combinedText}`;
+
+    const out = await aiComplete(prompt, { maxTokens: 3000 });
+    const parsed = safeParseJSON(out);
+    if (!parsed) throw new Error('Could not parse the Vault documents into structured fields.');
+
+    // ---- Build the patch — fill blanks only for raw extracted data, never clobber a figure
+    // the analyst already entered by hand (e.g. a negotiated UW price or an already-set field) ----
+    const fillIfBlank = ['units', 'vintage', 'askPrice', 'capex', 'gprAnnual', 'physVacLoss', 'lossToLease',
+      'badDebt', 'concessions', 'otherIncome', 'opexGA', 'opexMaintenance', 'opexPayroll', 'opexMarketing',
+      'opexContractServices', 'opexTaxes', 'opexInsurance', 'opexUtilities', 'opexManagement',
+      'brokerEGI', 'brokerCapRate', 'brokerRentPremium', 'brokerRenovPace'];
+    const patchObj = {};
+    fillIfBlank.forEach((k) => {
+      if (parsed[k] != null && parsed[k] !== '' && (d[k] == null || d[k] === '' || d[k] === 0)) patchObj[k] = parsed[k];
+    });
+
+    const units = Number(patchObj.units || d.units) || 0;
+    // Reserves: use whatever the documents actually stated; otherwise Altus's $250/unit default —
+    // a T-12 never carries this line, so its absence isn't itself informative.
+    if (d.opexReserves == null || d.opexReserves === '' || d.opexReserves === 0) {
+      patchObj.opexReserves = parsed.opexReserves != null ? parsed.opexReserves : (units > 0 ? 250 * units : null);
+    }
+    // trailingEGI feeds computeMetrics/computeUW directly — derive it from the GPR build when
+    // available (matches the going-in cap methodology), else fall back to the stated EGI line.
+    if (d.trailingEGI == null || d.trailingEGI === '' || d.trailingEGI === 0) {
+      const gpr = parsed.gprAnnual, loss = numOr(parsed.physVacLoss, 0) + numOr(parsed.lossToLease, 0) + numOr(parsed.badDebt, 0) + numOr(parsed.concessions, 0);
+      if (gpr != null) patchObj.trailingEGI = gpr - loss + numOr(parsed.otherIncome, 0);
+      else if (parsed.effectiveGrossIncome != null) patchObj.trailingEGI = parsed.effectiveGrossIncome;
+    }
+    // currentOpexTotal likewise feeds computeMetrics/computeUW — keep it in sync with the
+    // granular per-line breakdown rather than leaving it stale/blank.
+    const opexSum = ['opexGA', 'opexMaintenance', 'opexPayroll', 'opexMarketing', 'opexContractServices',
+      'opexTaxes', 'opexInsurance', 'opexUtilities', 'opexManagement']
+      .reduce((s, k) => s + numOr(patchObj[k] != null ? patchObj[k] : d[k], 0), 0) + numOr(patchObj.opexReserves != null ? patchObj.opexReserves : d.opexReserves, 0);
+    if (opexSum > 0) patchObj.currentOpexTotal = opexSum;
+
+    // The qualitative read regenerates every run — that's the point of clicking the button again.
+    patchObj.analystBrokerStory = parsed.brokerStory || d.analystBrokerStory;
+    patchObj.analystStoryRead = parsed.altusStoryRead || d.analystStoryRead;
+
+    // ---- Deterministic verdict, using the just-parsed figures merged over the existing deal ----
+    const merged = { ...d, ...patchObj };
+    const m = window.computeMetrics ? window.computeMetrics(merged) : { goingInCap: 0, totalBasis: 0 };
+    const uw = window.hasUWInputs && window.hasUWInputs(merged) && window.computeUW ? window.computeUW(merged) : null;
     const goingInCapPct = m.goingInCap * 100;
     const totalBasis = m.totalBasis;
     const hurdlePass = goingInCapPct >= 6.5;
 
-    // Year-3 stabilized NOI ÷ total cost basis, minus the going-in cap rate (100-150bps target band)
     const y3 = uw && uw.rows && uw.rows[3];
-    const yieldOnCostSpreadBps = (y3 && totalBasis > 0)
-      ? Math.round(((y3.noi / totalBasis) - m.goingInCap) * 10000)
-      : null;
+    const yieldOnCostSpreadBps = (y3 && totalBasis > 0) ? Math.round(((y3.noi / totalBasis) - m.goingInCap) * 10000) : null;
     const spreadPass = yieldOnCostSpreadBps != null && yieldOnCostSpreadBps >= 100;
-
-    const econVacPct = uw ? uw.inPlaceEconVac * 100 : null;
-    const avgCoC = uw ? uw.avgYield : null;
     const dealIRR = uw ? uw.irr : null;
 
     // Risk-adjusted return hurdle (sliding scale) — mirrors the analyst-screen/multifamily-uw
-    // skill's rule: a lower going-in cap rate carries more risk (heavier vacancy/lease-up
-    // dependence) and needs a materially higher IRR to compensate; a higher, more-stabilized
-    // going-in cap rate needs less. Anchor points from Acquisitions leadership: 4.0%→22%,
-    // 5.0%→20%, 7.0%+→15% (floor). Deliberately a simple first-pass ratio, not a fitted model.
+    // skill: 4.0%→22%, 5.0%→20%, 7.0%+→15% (floor). A lower going-in cap rate carries more risk
+    // and needs a materially higher IRR to compensate.
     const requiredIRRPct = goingInCapPct >= 7 ? 15
       : goingInCapPct >= 5 ? 20 - 2.5 * (goingInCapPct - 5)
       : 22 - 2 * (goingInCapPct - 4);
     const irrPass = dealIRR == null ? null : (dealIRR * 100) >= requiredIRRPct;
-
-    const ctx = [
-      'Property: ' + (d.name || '') + (d.market ? ' — ' + d.market : ''),
-      d.units ? 'Units: ' + d.units : '', d.vintage ? 'Year built: ' + d.vintage : '',
-      d.purchasePrice ? 'UW price: $' + Math.round(d.purchasePrice).toLocaleString() : '',
-      d.askPrice ? 'Ask: $' + Math.round(d.askPrice).toLocaleString() : '',
-      d.capex ? 'Capex / renovation budget: $' + Math.round(d.capex).toLocaleString() : '',
-      'Altus going-in cap rate (trailing EGI minus market-benchmarked opex, over UW price): ' + goingInCapPct.toFixed(2) + '%',
-      'Total cost basis (price + capex): $' + Math.round(totalBasis).toLocaleString(),
-      y3 ? 'Year-3 stabilized NOI: $' + Math.round(y3.noi).toLocaleString() : '',
-      yieldOnCostSpreadBps != null ? 'Yield-on-cost spread vs. going-in cap: ' + yieldOnCostSpreadBps + ' bps' : '',
-      econVacPct != null ? 'In-place economic vacancy: ' + econVacPct.toFixed(1) + '%' : '',
-      avgCoC != null ? 'Average cash-on-cash across the hold: ' + (avgCoC * 100).toFixed(1) + '%' : '',
-      dealIRR != null ? 'Full-hold levered IRR: ' + (dealIRR * 100).toFixed(1) + '%' : '',
-      'Required IRR at this going-in cap rate (risk-adjusted sliding scale): ' + requiredIRRPct.toFixed(1) + '%',
-      d.notes ? 'Existing analyst notes: ' + String(d.notes).slice(0, 600) : '',
-    ].filter(Boolean).join('\n');
-
-    const prompt = `You are an acquisitions analyst at Altus Equity screening a multifamily deal against the firm's investment criteria. Be direct and specific — this feeds a pipeline record other analysts and partners will read.
-
-DEAL DATA:
-${ctx}
-
-Return ONLY valid JSON (no markdown) with this shape:
-{
-  "brokerStory": "2-3 sentences: what is the broker claiming, and why (their pitch on value, upside, why now)",
-  "classification": "one of: physical-value-add, stabilized-operational, blended — physical-value-add means the NOI growth story depends on a capex/renovation program lifting rents on upgraded units; stabilized-operational means the broker is winning mostly on ancillary income and expense-line assumptions with little or no capex; blended is both",
-  "classificationReasoning": "1-2 sentences justifying the classification against the actual capex figure and NOI growth story above"
-}
-Do not include any text outside the JSON object.`;
-
-    const out = await aiComplete(prompt);
-    const parsed = safeParseJSON(out);
-    if (!parsed || !parsed.classification) throw new Error('Could not parse the screener response.');
-
-    // ---- Verdict logic (deterministic) ----
-    // Every path below that could land on GB Review also has to clear the risk-adjusted IRR bar
-    // (irrPass) — a lower going-in cap rate demands a higher IRR, so this replaces the old
-    // vacancy-specific override with the same general rule the analyst-screen/multifamily-uw
-    // skill now uses. irrPass === null means IRR isn't computable yet (no UW inputs) — that's
-    // flagged, not treated as a fail.
-    const irrNote = (passedVerb) => irrPass === false
+    const irrNote = () => irrPass === false
       ? ` However, the Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) is below the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar this going-in cap rate requires.`
       : irrPass == null
-      ? ` IRR wasn't available to check against the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar this going-in cap rate requires — confirm that once UW inputs are entered.`
-      : ` The Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) also clears the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar this going-in cap rate requires.`;
+      ? ` IRR wasn't available to check against the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar — confirm once Full UW assumptions are entered.`
+      : ` The Base-case levered IRR (${(dealIRR * 100).toFixed(1)}%) also clears the ${requiredIRRPct.toFixed(1)}% risk-adjusted bar.`;
 
-    let verdict, verdictReason;
+    let gbStatus, analystVerdict, verdictReason;
     if (!hurdlePass) {
-      verdict = "GB Don't Review";
+      gbStatus = "GB Don't Review"; analystVerdict = 'price';
       verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% is below the 6.5% hurdle.`;
     } else if (parsed.classification === 'stabilized-operational') {
-      verdict = irrPass === false ? "GB Don't Review" : 'GB Review';
+      const pass = irrPass !== false;
+      gbStatus = pass ? 'GB Review' : "GB Don't Review"; analystVerdict = pass ? 'proceed' : 'watch';
       verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle; little/no capex basis so the yield-on-cost spread isn't the deciding gate here.` + irrNote();
     } else if (spreadPass) {
-      verdict = irrPass === false ? "GB Don't Review" : 'GB Review';
+      const pass = irrPass !== false;
+      gbStatus = pass ? 'GB Review' : "GB Don't Review"; analystVerdict = pass ? 'proceed' : 'watch';
       verdictReason = `Going-in cap rate of ${goingInCapPct.toFixed(2)}% clears the 6.5% hurdle and the yield-on-cost spread (${yieldOnCostSpreadBps} bps) clears the 100 bps gate.` + irrNote();
     } else {
-      verdict = "GB Don't Review";
+      gbStatus = "GB Don't Review"; analystVerdict = 'watch';
       verdictReason = yieldOnCostSpreadBps == null
-        ? "Going-in cap rate clears the hurdle, but Year-3 stabilized NOI isn't available to test the yield-on-cost spread — enter a hold period ≥3 years and stabilized assumptions to complete the screen."
+        ? "Going-in cap rate clears the hurdle, but Year-3 stabilized NOI isn't available to test the yield-on-cost spread — enter a hold period ≥3 years and stabilized assumptions in Full UW to complete the screen."
         : `Going-in cap rate clears the hurdle, but the yield-on-cost spread (${yieldOnCostSpreadBps} bps) is below the 100 bps gate — the capital program isn't earning its keep even though the in-place basis is fine.`;
     }
+    patchObj.status = gbStatus;
+    patchObj.analystVerdict = analystVerdict;
+    patchObj.analystVerdictNotes = verdictReason;
 
-    const stamp = window.ALTUS_TODAY || new Date().toISOString().slice(0, 10);
-    const noteBlock = `\n\n— Analyst Screener (${stamp}) —\n` +
-      `Broker's story: ${parsed.brokerStory}\n` +
-      `Classification: ${parsed.classification} — ${parsed.classificationReasoning}\n` +
-      `Verdict: ${verdict} — ${verdictReason}`;
-
-    const result = { ...parsed, verdict, verdictReason, goingInCapPct, yieldOnCostSpreadBps, econVacPct };
-    patch(dealId, { status: verdict, notes: (d.notes ? d.notes : '') + noteBlock });
+    const result = { ...parsed, gbStatus, analystVerdict, verdictReason, goingInCapPct, yieldOnCostSpreadBps };
+    patch(dealId, patchObj);
     return result;
   };
 
