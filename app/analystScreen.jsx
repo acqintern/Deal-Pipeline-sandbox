@@ -170,6 +170,35 @@ function OpexTotalRow({ deal, units }) {
   );
 }
 
+function UnitMixRow({ row }) {
+  const pathLabel = row.path === 'markup' ? 'Markup Only' : row.path === 'capital' ? 'Needs Capital' : '—';
+  const pathColor = row.path === 'markup' ? 'var(--pos)' : row.path === 'capital' ? 'var(--warn)' : 'var(--faint)';
+  const pathBg = row.path === 'markup' ? 'var(--pos-soft)' : row.path === 'capital' ? 'var(--warn-soft)' : 'var(--panel-2)';
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 90px 90px 80px 110px',
+      padding: '7px 20px', borderBottom: '1px solid var(--line)', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--slate)' }}>{row.type}</span>
+      <span className="num" style={{ fontSize: 12, textAlign: 'center' }}>{row.units ?? '—'}</span>
+      <span className="num" style={{ fontSize: 12, textAlign: 'center', color: 'var(--muted)' }}>{row.avgSF ?? '—'}</span>
+      <span className="num" style={{ fontSize: 12.5, textAlign: 'center', fontWeight: 600 }}>
+        {row.currentRentPerUnit != null ? moneyA(row.currentRentPerUnit) : '—'}
+      </span>
+      <span className="num" style={{ fontSize: 12.5, textAlign: 'center', fontWeight: 600, color: 'var(--accent)' }}>
+        {row.marketRentPerUnit != null ? moneyA(row.marketRentPerUnit) : '—'}
+      </span>
+      <span className="num" style={{ fontSize: 12, textAlign: 'center',
+        color: row.gapPerUnit == null ? 'var(--faint)' : row.gapPerUnit >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+        {row.gapPerUnit != null ? (row.gapPerUnit >= 0 ? '+' : '') + moneyA(row.gapPerUnit) : '—'}
+      </span>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: pathColor, background: pathBg, borderRadius: 999, padding: '3px 9px' }}>
+          {pathLabel}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ManagementFeeRow({ deal, set, egi }) {
   const raw = deal.opexManagement;
   const pct = raw != null && raw !== '' && egi > 0 ? Number(raw) / egi * 100 : null;
@@ -619,6 +648,31 @@ function AnalystScreenTab({ deal, set }) {
                   onChange={(v) => set('analystVARationale', v)} />
               </div>
             </div>
+          </ASCard>
+
+          {/* Unit Mix & Rent Opportunity — rent roll x CoStar market rent by bedroom */}
+          <ASCard>
+            <ASCardHead title="Unit Mix & Rent Opportunity"
+              sub="Rent roll vs. CoStar market rent by bedroom — markup vs. capital-required" />
+            {Array.isArray(deal.analystUnitMix) && deal.analystUnitMix.length ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 90px 90px 80px 110px',
+                  padding: '8px 20px', borderBottom: '2px solid var(--line)', gap: 6 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>Type</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Units</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Avg SF</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Current</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>CoStar Mkt</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Gap</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Path</span>
+                </div>
+                {deal.analystUnitMix.map((row, i) => <UnitMixRow key={i} row={row} />)}
+              </>
+            ) : (
+              <div style={{ padding: '16px 20px', fontSize: 12.5, color: 'var(--faint)', fontStyle: 'italic' }}>
+                Run the Analyst Screener with a rent roll and a CoStar market-rent-by-bedroom table in the Vault to populate this.
+              </div>
+            )}
           </ASCard>
 
           {/* CoStar Market Data — parsed from the submarket report in the Vault */}

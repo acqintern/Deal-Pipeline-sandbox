@@ -3244,6 +3244,8 @@ Structured/numeric fields FIRST in your response, free-text narrative fields LAS
   "market": null, "vintage": null, "units": null, "askPrice": null, "capex": null,
   "gprAnnual": null, "physVacLoss": null, "lossToLease": null, "badDebt": null, "concessions": null, "otherIncome": null, "effectiveGrossIncome": null,
   "marketRentPerUnit": null,
+  "unitMix": [{ "type": "e.g. 1BR/1BA", "beds": 1, "units": null, "avgSF": null, "currentRentPerUnit": null }],
+  "costarMarketRentByBedroom": { "studio": null, "1br": null, "2br": null, "3br": null, "4br": null },
   "opexGA": null, "opexMaintenance": null, "opexPayroll": null, "opexMarketing": null, "opexContractServices": null,
   "opexTaxes": null, "opexInsurance": null, "opexUtilities": null, "opexManagement": null, "opexReserves": null,
   "brokerEGI": null, "brokerCapRate": null, "brokerRentPremium": null, "brokerRenovPace": null,
@@ -3261,6 +3263,8 @@ Definitions:
 - market = "City, ST" — city and two-letter state only, no street address or ZIP.
 - askPrice = the broker's guidance/asking price. Check the cover page investment-summary box first (common phrasings: "Offering Price," "Asking Price," "Price Guidance," "Contact Broker for Pricing" — if it says "contact for pricing" with no number, return null, don't guess). If no explicit dollar figure appears ANYWHERE but the OM states a cap rate, still return null here — the caller derives an implied price from the cap rate separately, don't do that math yourself.
 - marketRentPerUnit = current MARKET (asking, not in-place actual) rent in $/unit/month — usually the rent roll's or OM's per-unit market/asking rent figure, or GPR annual ÷ units ÷ 12 if only the annual GPR total is given.
+- unitMix = from the RENT ROLL: one row per distinct unit type/floorplan. "type" is whatever the rent roll calls it (e.g. "1BR/1BA", "A1", "2x2"); "beds" is the bedroom count as a plain number (0 for studio) — infer it from the type name/floorplan even if not separately labeled. "units" is the count of that type; "avgSF" is the average square footage for that type; "currentRentPerUnit" is the average CURRENT (actual, in-place) rent for OCCUPIED units of that type, in $/month — not market/asking rent, and not including vacant units in the average. Return [] if no rent roll is provided.
+- costarMarketRentByBedroom = from a CoStar report's "Market Rent Per Unit by Bedroom" table (or equivalent) if provided: the market rent in $/month for each bedroom count shown. Use only the keys the report actually shows; null for any not shown. Return all nulls if no CoStar report is provided.
 - vintage = the year the property was originally BUILT (construction vintage), not the renovation year. Look on the cover page, property-summary/highlights box, or a "Year Built"/"Built"/"Vintage" field. May read "Built in 1985", "Year Built: 1985", "1985 Vintage", or "Built 1986 / Renovated 2019" (take the BUILT year, 1986). For a multi-building property built in different years, return all of them joined exactly as printed, e.g. "1997/1986/1975". Return as a STRING; null if no construction year is stated anywhere.
 - brokerFirm = the full brokerage firm name from the cover page or "Exclusively Listed By" section.
 - brokerContacts = ONLY the named LISTING TEAM for this deal (1-6 people a buyer would actually contact) — the agents in the cover/"Exclusively Listed By" box and the final contact page(s). NEVER return a firm's full company directory/"our professionals" roster (a sign you're looking at one: 15+ names, no per-person phone/email, unrelated markets). Capture name + title even when phone/email aren't shown; use null for any missing field. Return [] if no individual listing contact is named anywhere.
@@ -3368,6 +3372,29 @@ ${combinedText}`;
     }
 
     const units = Number(patchObj.units || d.units) || 0;
+
+    // ---- Unit mix (from rent roll) x CoStar market rent by bedroom: classify each unit type's
+    // gap as a markup opportunity (re-lease as-is, no capital) or a capital-required opportunity
+    // (needs the renovation program to actually reach it) — per costar_market_analysis.md ----
+    if (Array.isArray(parsed.unitMix) && parsed.unitMix.length) {
+      const bedKey = (beds) => beds === 0 ? 'studio' : (beds >= 4 ? '4br' : beds + 'br');
+      const costarRents = parsed.costarMarketRentByBedroom || {};
+      patchObj.analystUnitMix = parsed.unitMix.filter((r) => r && r.type).map((r) => {
+        const marketRent = costarRents[bedKey(numOr(r.beds, 0))];
+        const current = r.currentRentPerUnit != null ? numOr(r.currentRentPerUnit, null) : null;
+        const gap = marketRent != null && current != null ? marketRent - current : null;
+        const gapPct = gap != null && current > 0 ? gap / current : null;
+        // Small/no gap, or a stabilized-operational deal with no capex story -> markup only.
+        // A meaningful gap on a physical-value-add/blended deal -> assume it needs the
+        // renovation program, since CoStar's market figure blends renovated and unrenovated
+        // stock in the submarket.
+        const path = gap == null ? null
+          : (gapPct <= 0.08 || parsed.classification === 'stabilized-operational') ? 'markup' : 'capital';
+        return { type: r.type, beds: numOr(r.beds, null), units: numOr(r.units, null), avgSF: numOr(r.avgSF, null),
+          currentRentPerUnit: current, marketRentPerUnit: marketRent != null ? marketRent : null,
+          gapPerUnit: gap, path };
+      });
+    }
     // Reserves: use whatever the documents actually stated; otherwise Altus's $250/unit default —
     // a T-12 never carries this line, so its absence isn't itself informative.
     if (d.opexReserves == null || d.opexReserves === '' || d.opexReserves === 0) {
