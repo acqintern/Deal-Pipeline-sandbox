@@ -3268,14 +3268,14 @@ Definitions:
 - physVacLoss / lossToLease / badDebt / concessions = each an ANNUAL dollar loss (positive number, 0 is a legitimate value here if the T-12 shows none), from that same income statement, directly below the GPR line.
 - effectiveGrossIncome = the in-place/current (NOT pro forma) Effective Gross Income line, if gprAnnual and the loss lines aren't separately broken out.
 - opex* = ANNUAL dollar total for that expense category from the T-12. T-12s vary widely in layout — use the category's OWN section header when the T-12 has one, and fall back to these keywords line-by-line when it doesn't (a flat T-12 with no section headers is common):
-  - opexGA: "General & Administrative", "Administrative Expenses" — office, legal, bank fees, phone, dues, keys/locks, fire/water safety, cable/internet, model unit, corporate unit, fuel, rental expense, insurance waiver.
+  - opexGA: "General & Administrative", "Administrative Expenses" — office, legal, bank fees, phone, dues, keys/locks, fire/water safety, cable/internet, model unit, corporate unit, fuel, rental expense, insurance waiver. CRITICAL — some T12s show Management Fee as a SUB-LINE nested inside the General & Administrative section rather than as its own separate top-level category. If that's the layout here, opexGA must be the G&A section's total MINUS the management fee sub-line — never the raw G&A subtotal as printed, since that would double-count the management fee (once inside opexGA, again inside opexManagement below). Check for this every time before returning opexGA.
   - opexMaintenance: "Repairs & Maintenance", "Operating & Maintenance", "Unit Make Ready", "Make Ready Expenses", "Turnover" — carpet, paint, plumbing, HVAC, electrical, appliance, cleaning, flooring, countertop, landscape supplies (not landscape contract — that's Contract Services below).
   - opexPayroll: "Payroll", "Payroll & Benefits", "Salaries", "Payroll Costs" — maintenance/leasing salaries, bonuses, commissions, overtime, payroll processing, IT labor. Mom-and-pop T-12s may list "MANAGER", "MAINTENANCE", "GROUND" as salary line items — these count as payroll too.
   - opexMarketing: "Marketing", "Advertising", "Advertising/Marketing/Promotions", "Leasing & Marketing".
   - opexContractServices: "Contract Services", "Service Contracts", "Security" — landscape CONTRACT (not supplies), pest control contract, security patrol, garbage/recycling/trash removal. This category is frequently missed because these line items are scattered rather than grouped under one header — actively search for landscaping, pest control, and trash/garbage removal line items even if no "Contract Services" header exists anywhere.
   - opexTaxes: "Property Taxes", "Real Estate Tax", "Real Property Taxes" — often combined with Insurance under a single "Taxes and Insurance" section; split by keyword if so.
   - opexInsurance: "Property Insurance", "Insurance - Property", "Insurance - Liability".
-  - opexUtilities: "Utilities", "Utility Expenses" — electricity, gas, water/sewer (the EXPENSE side, not RUBS income), trash removal if billed as a utility rather than a contract.
+  - opexUtilities: "Utilities", "Utility Expenses" — electricity, gas, water/sewer (the EXPENSE side, not RUBS income), trash removal if billed as a utility rather than a contract. Sum ALL utility sub-lines (electric + gas + water/sewer, each often shown separately) into ONE total — do not return just one sub-line's figure (e.g. water alone) as if it were the whole utilities total.
   - opexManagement: "Management Fee", "Management Fees" — typically shown as a % of EGI on the T-12 already; if only a % is shown, multiply by effectiveGrossIncome to get the annual dollar figure.
   Property taxes and insurance are almost always listed separately even when a "total operating expenses" subtotal above them excludes them — extract each individually regardless of that subtotal. opexReserves: a T-12 will almost never show this — if genuinely absent, return null (the caller applies a default), don't return 0.
   CRITICAL: every opex* figure must come from the T-12's ACTUAL / historical column — never the broker's pro forma, budgeted, or "Year 1 Forecast" expense column. Some T-12s and OMs show BOTH an "Actual" and a "Budget" (or "Pro Forma") column side by side for each expense line — always pick Actual. If you can't tell which column is actual, prefer the column explicitly labeled with a past year or "T-12"/"Trailing" over one labeled "Budget," "Forecast," or "Pro Forma."
@@ -3291,10 +3291,10 @@ Definitions:
 - If a CoStar submarket report is among the documents, extract these as short factual strings citing the actual figures (not generic market color), null if the report doesn't cover that point:
   - marketSupplyPipeline: new supply / units under construction in the submarket (e.g. "1,240 units under construction, 3.2% of existing inventory").
   - marketPopGrowth: recent population growth (e.g. "+2.1%/yr, 2020-2024").
-  - marketMedianIncome: median household income (e.g. "$68,400").
+  - marketMedianIncome: median household income SPECIFICALLY at the **2-mile radius** ring — CoStar demographic pages show this as a "Demographic Radius Rings" or "Demographic Summary" table with separate 10 Mile / 5 Mile / 2 Mile columns (or a single callout stat labeled "Med. HH Inc. (2 mi)"). Always use the 2-mile figure, never the 5-mile or 10-mile figure, even if the 2-mile column isn't the first one shown — the tightest radius is the most relevant to this specific property's renter pool. Return as a dollar string, e.g. "$72,385".
   - marketRentGrowth: recent/forecast rent growth in the submarket.
   - marketVacancy: submarket vacancy rate.
-  Then in marketSupportSummary, reason from those figures: does the median income plausibly support the rent levels this deal's premium/growth assumptions imply (rent should generally stay under ~30-35% of median household income for the unit sizes involved)? Cite the actual numbers, not a vague conclusion.
+  Then in marketSupportSummary: take 30% of the 2-mile median household income (annual), divide by 12 for a monthly affordability ceiling, and state it explicitly alongside the deal's current/market rent per unit — e.g. "2-mile median HH income of $72,385 supports rent up to $1,810/mo (30% of income); current rent of $1,238/mo is well under that ceiling, supporting room for further rent growth." Don't just conclude qualitatively — show the actual 30% figure and compare it to the actual rent figure.
 
 DOCUMENTS:
 ${combinedText}`;
@@ -3565,7 +3565,7 @@ Only ask about the BIG assumptions that actually move this deal's return — the
 
 Return ONLY valid JSON, no markdown:
 {
-  "brokerQuestions": "a bulleted list as ONE string, each question on its own line prefixed with '- ', 2-5 questions max"
+  "brokerQuestions": "a bulleted list as ONE string, each question on its own line prefixed with '- ', MAXIMUM 3 questions — pick only the 3 most important"
 }`;
     try {
       const qOut = await aiComplete(qPrompt, { maxTokens: 500 });

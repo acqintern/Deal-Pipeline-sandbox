@@ -409,21 +409,19 @@ function AnalystScreenTab({ deal, set }) {
             </div>
 
             {/* Broker cap rate input */}
-            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--line)', background: 'var(--panel-2)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div style={{ fontSize: 12, color: 'var(--muted)', flex: 'none' }}>Broker's advertised cap rate</div>
-                <div style={{ width: 120 }}>
-                  <ASInput value={deal.brokerCapRate ?? ''} suffix="%"
-                    onChange={(v) => set('brokerCapRate', v === '' ? null : Number(v))}
-                    placeholder="e.g. 5.25" />
+            {deal.brokerCapRate != null && deal.brokerCapRate !== '' && (
+              <div style={{ padding: '12px 20px', borderTop: '1px solid var(--line)', background: 'var(--panel-2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', flex: 'none' }}>Broker's advertised cap rate (from OM)</div>
+                  <span className="num" style={{ fontSize: 13, fontWeight: 600, color: 'var(--slate)' }}>{numA(deal.brokerCapRate).toFixed(2)}%</span>
+                  {brokerCapFromNOI && altusCap && (
+                    <div className="num" style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                      {Math.abs(noiBps)} bps {noiBps >= 0 ? 'above' : 'below'} broker
+                    </div>
+                  )}
                 </div>
-                {brokerCapFromNOI && altusCap && (
-                  <div className="num" style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
-                    {Math.abs(noiBps)} bps {noiBps >= 0 ? 'above' : 'below'} broker
-                  </div>
-                )}
               </div>
-            </div>
+            )}
           </ASCard>
 
           {/* Bridge analysis */}
@@ -591,20 +589,6 @@ function AnalystScreenTab({ deal, set }) {
                       {((numA(deal.analystRenovUnits) / units) * 100).toFixed(0)}% of {units} total units
                     </div>
                   )}
-                </div>
-                <div>
-                  <ASLbl>Broker's Stated Premium</ASLbl>
-                  <ASInput value={deal.brokerRentPremium ?? ''}
-                    onChange={(v) => set('brokerRentPremium', v === '' ? null : Number(v))}
-                    prefix="$" suffix="/unit/mo"
-                    placeholder="from OM" />
-                </div>
-                <div>
-                  <ASLbl>Broker's Stated Pace</ASLbl>
-                  <ASInput value={deal.brokerRenovPace ?? ''}
-                    onChange={(v) => set('brokerRenovPace', v === '' ? null : Number(v))}
-                    suffix="turns/yr"
-                    placeholder="from OM" />
                 </div>
               </div>
 
