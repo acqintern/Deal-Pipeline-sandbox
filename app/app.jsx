@@ -3251,7 +3251,8 @@ Structured/numeric fields FIRST in your response, free-text narrative fields LAS
   "brokerEGI": null, "brokerCapRate": null, "brokerRentPremium": null, "brokerRenovPace": null,
   "brokerAncillaryIncomeMonthly": null, "brokerStabEconVac": null,
   "assumableLoan": { "rate": null, "balance": null, "origDate": null, "maturity": null, "amYears": null, "ioYears": null },
-  "marketSupplyPipeline": null, "marketPopGrowth": null, "marketMedianIncome": null, "marketRentGrowth": null, "marketVacancy": null,
+  "marketSupplyPipeline": null, "marketPopGrowth": null, "marketMedianIncome": null, "marketRentGrowth": null, "marketVacancy": null, "marketVacancyPct": null,
+  "costarInsurancePerUnit": null, "costarTaxesPerUnit": null,
   "brokerFirm": null, "brokerContacts": [{ "name": null, "title": null, "phone": null, "email": null }],
   "classification": "one of: physical-value-add, stabilized-operational, blended",
   "marketSupportSummary": "if a CoStar/submarket report is provided: 1-2 sentences citing the specific figures above and whether they support or undermine the case for further rent growth. null if no CoStar report is provided.",
@@ -3273,7 +3274,7 @@ Definitions:
 - effectiveGrossIncome = the in-place/current (NOT pro forma) Effective Gross Income line, if gprAnnual and the loss lines aren't separately broken out.
 - opex* = ANNUAL dollar total for that expense category from the T-12. T-12s vary widely in layout — use the category's OWN section header when the T-12 has one, and fall back to these keywords line-by-line when it doesn't (a flat T-12 with no section headers is common):
   - opexGA: "General & Administrative", "Administrative Expenses" — office, legal, bank fees, phone, dues, keys/locks, fire/water safety, cable/internet, model unit, corporate unit, fuel, rental expense, insurance waiver. CRITICAL — some T12s show Management Fee as a SUB-LINE nested inside the General & Administrative section rather than as its own separate top-level category. If that's the layout here, opexGA must be the G&A section's total MINUS the management fee sub-line — never the raw G&A subtotal as printed, since that would double-count the management fee (once inside opexGA, again inside opexManagement below). Check for this every time before returning opexGA.
-  - opexMaintenance: "Repairs & Maintenance", "Operating & Maintenance", "Unit Make Ready", "Make Ready Expenses", "Turnover" — carpet, paint, plumbing, HVAC, electrical, appliance, cleaning, flooring, countertop, landscape supplies (not landscape contract — that's Contract Services below).
+  - opexMaintenance: "Repairs & Maintenance", "Operating & Maintenance", "Unit Make Ready", "Make Ready Expenses", "Turnover" — carpet, paint, plumbing, HVAC, electrical, appliance, cleaning, flooring, countertop, landscape supplies (not landscape contract — that's Contract Services below). IMPORTANT: if the T12 lists "Turnover" or "Make Ready" as its OWN separate line from "Repairs & Maintenance," they still both belong in this ONE opexMaintenance total — ADD them together, don't return only the R&M line and leave turnover uncounted, and don't treat turnover as its own category.
   - opexPayroll: "Payroll", "Payroll & Benefits", "Salaries", "Payroll Costs" — maintenance/leasing salaries, bonuses, commissions, overtime, payroll processing, IT labor. Mom-and-pop T-12s may list "MANAGER", "MAINTENANCE", "GROUND" as salary line items — these count as payroll too.
   - opexMarketing: "Marketing", "Advertising", "Advertising/Marketing/Promotions", "Leasing & Marketing".
   - opexContractServices: "Contract Services", "Service Contracts", "Security" — landscape CONTRACT (not supplies), pest control contract, security patrol, garbage/recycling/trash removal. This category is frequently missed because these line items are scattered rather than grouped under one header — actively search for landscaping, pest control, and trash/garbage removal line items even if no "Contract Services" header exists anywhere.
@@ -3297,8 +3298,10 @@ Definitions:
   - marketPopGrowth: recent population growth (e.g. "+2.1%/yr, 2020-2024").
   - marketMedianIncome: median household income SPECIFICALLY at the **2-mile radius** ring — CoStar demographic pages show this as a "Demographic Radius Rings" or "Demographic Summary" table with separate 10 Mile / 5 Mile / 2 Mile columns (or a single callout stat labeled "Med. HH Inc. (2 mi)"). Always use the 2-mile figure, never the 5-mile or 10-mile figure, even if the 2-mile column isn't the first one shown — the tightest radius is the most relevant to this specific property's renter pool. Return as a dollar string, e.g. "$72,385".
   - marketRentGrowth: recent/forecast rent growth in the submarket.
-  - marketVacancy: submarket vacancy rate.
-  Then in marketSupportSummary: take 30% of the 2-mile median household income (annual), divide by 12 for a monthly affordability ceiling, and state it explicitly alongside the deal's current/market rent per unit — e.g. "2-mile median HH income of $72,385 supports rent up to $1,810/mo (30% of income); current rent of $1,238/mo is well under that ceiling, supporting room for further rent growth." Don't just conclude qualitatively — show the actual 30% figure and compare it to the actual rent figure.
+  - marketVacancy: submarket vacancy rate, as a descriptive string (e.g. "11.8% current, 12.5% 5-yr avg").
+  - marketVacancyPct: the SAME submarket current vacancy rate as a plain percent NUMBER (e.g. 11.8, not 0.118) — this drives the stabilized economic vacancy assumption, so it must be a number, not a string.
+  - costarInsurancePerUnit / costarTaxesPerUnit: if the report includes an "Expenses Per SF (Annual)" table broken out by star rating, convert the Insurance and Taxes columns (per SF) for the star rating/submarket closest to this property to an ANNUAL $/unit figure (multiply by the property's average unit SF from the OM/rent roll). null if no such table is present.
+  marketSupportSummary is the ONE field the analyst actually sees on this — fold ALL of the figures above into a single tight note (3-5 sentences), not separate bullet points: supply pipeline, population growth, the 2-mile median income with its 30%-of-income monthly affordability ceiling stated explicitly next to the deal's current/market rent (e.g. "2-mile median HH income of $72,385 supports rent up to $1,810/mo; current rent of $1,238/mo is well under that ceiling"), rent growth, submarket vacancy, and an overall conclusion on whether the market supports further rent growth. Cite actual numbers throughout, not vague color.
 
 DOCUMENTS:
 ${combinedText}`;
@@ -3316,8 +3319,7 @@ ${combinedText}`;
     const fillIfBlank = ['market', 'vintage', 'units', 'askPrice', 'capex', 'gprAnnual', 'physVacLoss', 'lossToLease',
       'badDebt', 'concessions', 'otherIncome', 'marketRentPerUnit', 'opexGA', 'opexMaintenance', 'opexPayroll', 'opexMarketing',
       'opexContractServices', 'opexTaxes', 'opexInsurance', 'opexUtilities', 'opexManagement',
-      'brokerEGI', 'brokerFirm', 'marketSupplyPipeline', 'marketPopGrowth', 'marketMedianIncome',
-      'marketRentGrowth', 'marketVacancy', 'marketSupportSummary'];
+      'brokerEGI', 'brokerFirm', 'marketSupportSummary'];
     // brokerCapRate/brokerRentPremium/brokerRenovPace are never legitimately 0 in reality — a
     // 0 here almost always means the model defaulted to it instead of returning null when the
     // OM simply didn't state one (e.g. pricing guidance given with no advertised cap rate).
@@ -3414,10 +3416,34 @@ ${combinedText}`;
       .reduce((s, k) => s + numOr(patchObj[k] != null ? patchObj[k] : d[k], 0), 0) + numOr(patchObj.opexReserves != null ? patchObj.opexReserves : d.opexReserves, 0);
     if (opexSum > 0) patchObj.currentOpexTotal = opexSum;
     // "Our assumption" opex/unit (marketOpexPerUnit) drives the going-in NOI build in
-    // computeMetrics/computeUW — start it at the current actual per unit if blank; the analyst
-    // adjusts it from there once they've formed their own view.
-    if ((d.marketOpexPerUnit == null || d.marketOpexPerUnit === '' || d.marketOpexPerUnit === 0) && opexSum > 0 && units > 0) {
-      patchObj.marketOpexPerUnit = Math.round(opexSum / units);
+    // computeMetrics/computeUW. Build it line by line: clamp each category's actual $/unit into
+    // Altus's benchmark range (below range -> floor, above range -> ceiling) rather than just
+    // averaging the raw actual — mirrors opex_benchmarks.md's "Clamping the T12 actual into
+    // Altus's assumption" rule. A below-range figure is treated as unsustainable; an above-range
+    // figure is treated as an achievable operational-efficiency lever, not a permanent cost.
+    if ((d.marketOpexPerUnit == null || d.marketOpexPerUnit === '' || d.marketOpexPerUnit === 0) && units > 0) {
+      const perUnit = (k) => {
+        const v = patchObj[k] != null ? patchObj[k] : d[k];
+        return v != null && v !== '' ? Number(v) / units : null;
+      };
+      const clamp = (v, lo, hi) => v == null ? null : Math.min(Math.max(v, lo), hi);
+      const gaVal = clamp(perUnit('opexGA'), 200, 350);
+      const maintVal = clamp(perUnit('opexMaintenance'), 600, 900);
+      const payrollVal = clamp(perUnit('opexPayroll'), 1250, 1850);
+      const marketingVal = clamp(perUnit('opexMarketing'), 100, 350);
+      const contractVal = clamp(perUnit('opexContractServices'), 250, 500);
+      // Insurance & taxes: prefer a CoStar expense-benchmark figure when the report has one,
+      // else clamp the actual into the generic range/default.
+      const insActual = clamp(perUnit('opexInsurance'), 700, 1200);
+      const insVal = parsed.costarInsurancePerUnit != null ? Number(parsed.costarInsurancePerUnit)
+        : (insActual != null ? insActual : 900);
+      const taxVal = parsed.costarTaxesPerUnit != null ? Number(parsed.costarTaxesPerUnit) : perUnit('opexTaxes');
+      const utilVal = perUnit('opexUtilities'); // no fixed range to clamp into
+      const reserveVal = clamp(patchObj.opexReserves != null ? Number(patchObj.opexReserves) / units : null, 250, 400);
+      const mgmtVal = perUnit('opexManagement'); // %-of-revenue based; already floored at 3% via ZERO_MEANS_MISSING logic elsewhere
+      const lines = [gaVal, maintVal, payrollVal, marketingVal, contractVal, insVal, taxVal, utilVal, reserveVal, mgmtVal]
+        .filter((v) => v != null);
+      if (lines.length) patchObj.marketOpexPerUnit = Math.round(lines.reduce((s, v) => s + v, 0));
     }
 
     // ---- Stabilized Other Income: current T-12 other income + any NEW ancillary income
@@ -3484,9 +3510,15 @@ suggestedCapexPerUnit: the $2,000/unit floor if the property looks well-maintain
     // as economic vacancy (economic vacancy includes loss-to-lease/concessions/bad debt on top
     // of physical vacancy, so it's always the higher of the two) — fall back to the default
     // rather than trust an implausibly low number. ----
+    // Priority: (1) CoStar submarket's actual reported vacancy — real, current market
+    // performance beats a generic assumption; (2) broker's stated stabilized figure; (3) 12%
+    // default. The under-8% sanity floor still applies to whichever figure is used, since a
+    // number that low is almost always a physical-vacancy mixup, not real economic vacancy.
     if (d.stabEconVac == null || d.stabEconVac === '') {
+      const mv = parsed.marketVacancyPct;
       const bv = parsed.brokerStabEconVac;
-      patchObj.stabEconVac = (bv != null && bv >= 8) ? bv : 12;
+      const candidate = mv != null ? mv : (bv != null ? bv : 12);
+      patchObj.stabEconVac = (candidate >= 8) ? candidate : 12;
     }
     const stabEconVacPct = numOr(patchObj.stabEconVac != null ? patchObj.stabEconVac : d.stabEconVac, 12);
 

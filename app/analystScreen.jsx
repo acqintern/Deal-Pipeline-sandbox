@@ -177,7 +177,7 @@ function UnitMixRow({ row }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 90px 90px 80px 110px',
       padding: '7px 20px', borderBottom: '1px solid var(--line)', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontSize: 12.5, color: 'var(--slate)' }}>{row.type}</span>
+      <span style={{ fontSize: 12.5, color: 'var(--slate)', textAlign: 'center' }}>{row.type}</span>
       <span className="num" style={{ fontSize: 12, textAlign: 'center' }}>{row.units ?? '—'}</span>
       <span className="num" style={{ fontSize: 12, textAlign: 'center', color: 'var(--muted)' }}>{row.avgSF ?? '—'}</span>
       <span className="num" style={{ fontSize: 12.5, textAlign: 'center', fontWeight: 600 }}>
@@ -195,6 +195,40 @@ function UnitMixRow({ row }) {
           {pathLabel}
         </span>
       </div>
+    </div>
+  );
+}
+
+function UnitMixTotalRow({ rows }) {
+  const totalUnits = rows.reduce((s, r) => s + (Number(r.units) || 0), 0);
+  const wAvg = (key) => {
+    let sum = 0, wsum = 0;
+    rows.forEach((r) => {
+      const u = Number(r.units) || 0, v = r[key];
+      if (u > 0 && v != null) { sum += v * u; wsum += u; }
+    });
+    return wsum > 0 ? sum / wsum : null;
+  };
+  const avgCurrent = wAvg('currentRentPerUnit');
+  const avgMarket = wAvg('marketRentPerUnit');
+  const avgGap = avgCurrent != null && avgMarket != null ? avgMarket - avgCurrent : null;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 90px 90px 80px 110px',
+      padding: '9px 20px', alignItems: 'center', gap: 6, background: 'var(--panel-2)', borderTop: '2px solid var(--line)' }}>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)', textAlign: 'center' }}>Total / Avg. Asking Rent</span>
+      <span className="num" style={{ fontSize: 12.5, fontWeight: 700, textAlign: 'center' }}>{totalUnits || '—'}</span>
+      <span style={{ textAlign: 'center', color: 'var(--faint)' }}>—</span>
+      <span className="num" style={{ fontSize: 12.5, fontWeight: 700, textAlign: 'center' }}>
+        {avgCurrent != null ? moneyA(avgCurrent) : '—'}
+      </span>
+      <span className="num" style={{ fontSize: 12.5, fontWeight: 700, textAlign: 'center', color: 'var(--accent)' }}>
+        {avgMarket != null ? moneyA(avgMarket) : '—'}
+      </span>
+      <span className="num" style={{ fontSize: 12, textAlign: 'center',
+        color: avgGap == null ? 'var(--faint)' : avgGap >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+        {avgGap != null ? (avgGap >= 0 ? '+' : '') + moneyA(avgGap) : '—'}
+      </span>
+      <span />
     </div>
   );
 }
@@ -273,10 +307,6 @@ function AnalystScreenTab({ deal, set }) {
   // Cap delta
   const capDelta = altusCap != null && brokerCapFromNOI != null ? altusCap - brokerCapFromNOI : null;
   const noiBps = capDelta != null ? Math.round(capDelta * 10000) : null;
-
-  // Hurdle math
-  const priceToClose = altusNOI > 0 ? altusNOI / HURDLE : null; // price needed to hit 6.5%
-  const priceDelta = priceToClose && price ? price - priceToClose : null; // positive = overpaying
 
   const noUWWarning = !hasFullUW && (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px',
@@ -453,62 +483,6 @@ function AnalystScreenTab({ deal, set }) {
             )}
           </ASCard>
 
-          {/* Bridge analysis */}
-          <ASCard>
-            <ASCardHead title="Bridge to 6.50% Hurdle"
-              sub="What it takes to clear — negotiate with these numbers" />
-            <div style={{ padding: '18px 20px' }}>
-              {altusNOI <= 0 || price <= 0 ? (
-                <div style={{ fontSize: 13, color: 'var(--faint)', fontStyle: 'italic' }}>
-                  Enter purchase price and income to compute the bridge.
-                </div>
-              ) : altusCap != null && altusCap >= HURDLE ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '12px 16px', background: 'var(--pos-soft)',
-                    border: '1px solid var(--pos)', borderRadius: 8 }}>
-                    <Icon name="check" size={14} style={{ color: 'var(--pos)', flex: 'none' }} />
-                    <span style={{ fontSize: 13, color: 'var(--pos)', fontWeight: 500 }}>
-                      Deal clears at current price. No bridge needed.
-                    </span>
-                  </div>
-                  <BridgeRow label="NOI at current price" value={moneyA(altusNOI)} accent="var(--accent)" />
-                  <BridgeRow label="Cap rate" value={(altusCap * 100).toFixed(2) + '%'} accent="var(--pos)" />
-                  <BridgeRow label="Headroom above 6.5%" value={'+' + ((altusCap - HURDLE) * 100).toFixed(0) + ' bps'} accent="var(--pos)" />
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '12px 16px', background: 'var(--warn-soft)',
-                    border: '1px solid rgba(184,114,20,.25)', borderRadius: 8 }}>
-                    <Icon name="flag" size={14} style={{ color: 'var(--warn)', flex: 'none' }} />
-                    <div style={{ fontSize: 13, color: 'var(--warn)' }}>
-                      Deal misses by <span className="num" style={{ fontWeight: 700 }}>{Math.abs((altusCap - HURDLE) * 100).toFixed(0)} bps</span>.
-                      Use the numbers below to negotiate or reprice.
-                    </div>
-                  </div>
-                  <BridgeRow label="Altus NOI" value={moneyA(altusNOI)} accent="var(--accent)" />
-                  <BridgeRow label="Price to clear 6.5%"
-                    value={shortA(priceToClose)}
-                    sub={'= NOI ÷ 6.5%'}
-                    accent="var(--ink)" />
-                  <BridgeRow label="Current UW Price"
-                    value={shortA(price)}
-                    accent="var(--slate)" />
-                  <BridgeRow label="Required price cut"
-                    value={(priceDelta >= 0 ? '−' : '+') + shortA(Math.abs(priceDelta))}
-                    sub={price > 0 ? ((priceDelta / price) * 100).toFixed(1) + '% reduction from UW price' : ''}
-                    accent={priceDelta >= 0 ? 'var(--neg)' : 'var(--pos)'} />
-                  {units > 0 && priceDelta > 0 && (
-                    <BridgeRow label="Required cut per unit"
-                      value={'−' + moneyA(priceDelta / units) + '/unit'}
-                      accent="var(--neg)" />
-                  )}
-                </div>
-              )}
-            </div>
-          </ASCard>
-
           {/* Operating expense per-unit benchmark — analysis only, does not feed the NOI build above */}
           <ASCard>
             <ASCardHead title="Operating Expense Benchmark (Per Unit)"
@@ -658,7 +632,7 @@ function AnalystScreenTab({ deal, set }) {
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 90px 90px 80px 110px',
                   padding: '8px 20px', borderBottom: '2px solid var(--line)', gap: 6 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>Type</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Type</span>
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Units</span>
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Avg SF</span>
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Current</span>
@@ -667,6 +641,7 @@ function AnalystScreenTab({ deal, set }) {
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>Path</span>
                 </div>
                 {deal.analystUnitMix.map((row, i) => <UnitMixRow key={i} row={row} />)}
+                <UnitMixTotalRow rows={deal.analystUnitMix} />
               </>
             ) : (
               <div style={{ padding: '16px 20px', fontSize: 12.5, color: 'var(--faint)', fontStyle: 'italic' }}>
@@ -678,45 +653,10 @@ function AnalystScreenTab({ deal, set }) {
           {/* CoStar Market Data — parsed from the submarket report in the Vault */}
           <ASCard>
             <ASCardHead title="CoStar Market Data" sub="Parsed from the submarket report in the Vault" />
-            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
-                <div>
-                  <ASLbl>Supply Pipeline</ASLbl>
-                  <ASTextarea value={deal.marketSupplyPipeline} rows={2}
-                    placeholder="Units under construction, % of existing inventory…"
-                    onChange={(v) => set('marketSupplyPipeline', v)} />
-                </div>
-                <div>
-                  <ASLbl>Population Growth</ASLbl>
-                  <ASTextarea value={deal.marketPopGrowth} rows={2}
-                    placeholder="Recent annual population growth…"
-                    onChange={(v) => set('marketPopGrowth', v)} />
-                </div>
-                <div>
-                  <ASLbl>Median Household Income</ASLbl>
-                  <ASTextarea value={deal.marketMedianIncome} rows={2}
-                    placeholder="e.g. $68,400"
-                    onChange={(v) => set('marketMedianIncome', v)} />
-                </div>
-                <div>
-                  <ASLbl>Submarket Rent Growth</ASLbl>
-                  <ASTextarea value={deal.marketRentGrowth} rows={2}
-                    placeholder="Recent / forecast rent growth…"
-                    onChange={(v) => set('marketRentGrowth', v)} />
-                </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <ASLbl>Submarket Vacancy</ASLbl>
-                  <ASTextarea value={deal.marketVacancy} rows={2}
-                    placeholder="Current submarket vacancy rate…"
-                    onChange={(v) => set('marketVacancy', v)} />
-                </div>
-              </div>
-              <div>
-                <ASLbl>Does Income Support Further Rent Growth?</ASLbl>
-                <ASTextarea value={deal.marketSupportSummary} rows={6}
-                  placeholder="Reasoning tying the figures above together — does median income actually support the rent levels this deal's assumptions imply?"
-                  onChange={(v) => set('marketSupportSummary', v)} />
-              </div>
+            <div style={{ padding: '16px 20px' }}>
+              <ASTextarea value={deal.marketSupportSummary} rows={6}
+                placeholder="Supply pipeline, population growth, median household income (and the 30%-of-income rent affordability ceiling), rent growth, and submarket vacancy — plus whether the numbers support further rent growth."
+                onChange={(v) => set('marketSupportSummary', v)} />
             </div>
           </ASCard>
         </div>
@@ -725,18 +665,6 @@ function AnalystScreenTab({ deal, set }) {
   );
 }
 
-function BridgeRow({ label, value, sub, accent }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12,
-      padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
-      <div>
-        <span style={{ fontSize: 12.5, color: 'var(--slate)' }}>{label}</span>
-        {sub && <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 8 }}>{sub}</span>}
-      </div>
-      <span className="num" style={{ fontSize: 14, fontWeight: 700, color: accent || 'var(--ink)', flex: 'none' }}>{value}</span>
-    </div>
-  );
-}
 
 // inputSty needs to be accessible inside the component; move it out
 const inputSty = { border: '1px solid var(--line-2)', borderRadius: 7, padding: '0 10px',
